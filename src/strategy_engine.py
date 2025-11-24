@@ -47,11 +47,15 @@ class StrategyEngine:
             # 3. Get Analysis
             signal = self.analyst.analyze_market(market_context)
             
-            if signal and signal.action != Action.WAIT:
-                self.active_plan = signal
-                logger.info(f"PLAN GENERATED: {signal.action} at {signal.entry} (Stop: {signal.stop_loss})")
+            if signal:
+                if signal.action != Action.WAIT:
+                    self.active_plan = signal
+                    logger.info(f"PLAN GENERATED: {signal.action} at {signal.entry} (Stop: {signal.stop_loss}, TP: {signal.take_profit}) Conf: {signal.confidence}")
+                else:
+                    logger.info("PLAN RESULT: Gemini advised WAIT.")
+                    self.active_plan = None
             else:
-                logger.info("Plan is WAIT or generation failed.")
+                logger.warning("PLAN RESULT: Gemini signal generation failed.")
                 self.active_plan = None
                 
         except Exception as e:

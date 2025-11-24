@@ -832,6 +832,11 @@ dependencies = [
     { name = "trading-ig" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "apscheduler", specifier = ">=3.11.1" },
@@ -842,6 +847,9 @@ requires-dist = [
     { name = "tenacity", specifier = ">=9.1.2" },
     { name = "trading-ig", specifier = ">=0.0.22" },
 ]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest", specifier = ">=9.0.1" }]
 
 [[package]]
 name = "trading-ig"

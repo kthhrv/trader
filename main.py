@@ -57,7 +57,7 @@ def graceful_shutdown(signum, frame):
 def main():
     parser = argparse.ArgumentParser(description="AI Market Open Trader")
     parser.add_argument("--now", action="store_true", help="Run the strategy immediately and exit")
-    parser.add_argument("--epic", type=str, default="CS.D.FTSE600.TODAY.IP", help="The epic to trade (used with --now)")
+    parser.add_argument("--epic", type=str, default="IX.D.FTSE.CFD.IP", help="The epic to trade (used with --now)")
     
     args = parser.parse_args()
 
