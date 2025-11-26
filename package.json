@@ -1,0 +1,19 @@
+{
+  "name": "trader",
+  "version": "1.0.0",
+  "description": "A fully automated trading bot that leverages Google's **Gemini 3 Pro Preview** (via `gemini-2.0-flash-thinking-exp` reasoning models) to analyze market opens and execute breakout strategies on the IG Markets platform.",
+  "main": "index.js",
+  "directories": {
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "lightstreamer-client": "^7.3.2"
+  }
+}

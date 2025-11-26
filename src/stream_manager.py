@@ -1,82 +1,172 @@
 import logging
+import subprocess
+import json
+import threading
+import sys
 import time
-from typing import Callable, Optional
-from trading_ig import IGStreamService
-from trading_ig.lightstreamer import Subscription
-from config import IG_API_KEY, IG_USERNAME, IG_PASSWORD, IG_ACC_ID, IS_LIVE
+from typing import Callable, Dict, Optional
+from src.ig_client import IGClient
+from config import IS_LIVE
 
 logger = logging.getLogger(__name__)
 
 class StreamManager:
-    def __init__(self, ig_service):
-        """
-        Initializes the Stream Manager.
+    def __init__(self, ig_client: IGClient):
+        self.ig_client = ig_client
+        self.process: Optional[subprocess.Popen] = None
+        self.reader_thread: Optional[threading.Thread] = None
+        self.callbacks: Dict[str, Callable[[dict], None]] = {}
+        self.is_connected = threading.Event() # Event to signal connection status
         
-        Args:
-            ig_service: An authenticated IGService instance (from IGClient).
-        """
-        self.service = ig_service
-        self.stream_service = IGStreamService(self.service)
-        self.session = None
-        self.subscription: Optional[Subscription] = None
-        self.price_callback: Optional[Callable] = None
-        
+        self.ls_endpoint = "https://demo-apd.marketdatasystems.com" 
+        if IS_LIVE:
+            self.ls_endpoint = "https://apd.marketdatasystems.com"
+
+    def _read_stdout(self, pipe):
+        for line in iter(pipe.readline, ''):
+            line_str = line.strip()
+            if line_str.startswith("{") and line_str.endswith("}"):
+                try:
+                    data = json.loads(line_str)
+                    epic = data.get('epic')
+                    if epic and epic in self.callbacks:
+                        self.callbacks[epic](data) # Call registered callback
+                    else:
+                        logger.debug(f"Received unhandled stream data: {data}")
+                except json.JSONDecodeError:
+                    logger.warning(f"Failed to decode JSON from Node.js stream: {line_str}")
+            elif "[NODE_STREAM_INFO]" in line_str:
+                logger.info(f"[Node.js Stream] {line_str.replace('[NODE_STREAM_INFO] ', '')}")
+                if "[LS Status]: CONNECTED" in line_str:
+                    self.is_connected.set() # Signal connection is established
+            elif "[NODE_STREAM_ERROR]" in line_str:
+                logger.error(f"[Node.js Stream] {line_str.replace('[NODE_STREAM_ERROR] ', '')}")
+            else:
+                logger.debug(f"[Node.js Stream Raw]: {line_str}")
+
     def connect(self):
         """
-        Establishes the Lightstreamer connection.
+        Spawns the Node.js stream service as a subprocess.
         """
+        if self.process and self.process.poll() is None:
+            logger.info("Node.js stream service already running.")
+            return
+
         try:
-            self.session = self.stream_service.create_session()
-            logger.info("Connected to IG Lightstreamer.")
+            # Ensure REST tokens are fresh
+            if not self.ig_client.authenticated:
+                self.ig_client.authenticate()
+            
+            # Extract Tokens directly from headers
+            headers = self.ig_client.service.session.headers
+            cst = headers.get('CST')
+            xst = headers.get('X-SECURITY-TOKEN')
+            account_id = self.ig_client.service.account_id
+
+            if not cst or not xst or not account_id:
+                raise ValueError("Could not find CST/XST tokens or account ID in IGClient session.")
+            
+            script_path = "src/stream_service.js"
+            
+            # Pass credentials and epic as arguments to Node.js script
+            cmd = ["node", script_path, cst, xst, account_id, "PLACEHOLDER_EPIC", self.ls_endpoint] # Epic is a placeholder, will be updated via subscribe_to_epic
+            
+            logger.info(f"Spawning Node.js stream service: {' '.join(cmd)}")
+            self.process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=1, text=True) # Ensure line-buffering
+            
+            self.reader_thread = threading.Thread(target=self._read_stdout, args=(self.process.stdout,))
+            self.reader_thread.daemon = True
+            self.reader_thread.start()
+            
+            # Wait for connection status from Node.js
+            if not self.is_connected.wait(timeout=10): # Wait up to 10 seconds for connection
+                logger.warning("Node.js stream service did not report CONNECTED status within timeout.")
+                # Consider killing the process if not connected
+                self.stop()
+            else:
+                logger.info("Node.js stream service connected successfully.")
+            
         except Exception as e:
-            logger.error(f"Failed to connect to stream: {e}")
+            logger.error(f"Failed to start Node.js stream service: {e}")
+            self.stop()
             raise
 
-    def start_tick_subscription(self, epic: str, callback: Callable[[dict], None]):
+    def subscribe_to_epic(self, epic: str, callback: Callable[[dict], None]):
         """
-        Subscribes to L1 prices (Bids/Offers) for a specific epic.
-        
-        Args:
-            epic (str): The instrument epic.
-            callback (Callable): Function to call on new price data. 
-                                 Signature: callback(item_update)
+        Subscribes to an epic via the Node.js stream service.
+        This will actually send a command to the Node.js process.
+        For simplicity for now, we will restart the Node.js process with the new epic.
+        A more robust solution would be IPC for dynamic subscriptions.
         """
-        self.price_callback = callback
-        
-        # Subscription for Chart ticks or L1 prices
-        # 'MARKET:{epic}' is the standard item for L1 prices
-        item = f"MARKET:{epic}"
-        fields = ["BID", "OFFER", "HIGH", "LOW", "MARKET_STATE"]
-        
-        # Subscribe using the high-level method
-        self.subscription = self.stream_service.subscribe_to_market_ticks(
-            epic,
-            self._on_price_update # The callback function
-        )
-        logger.info(f"Subscribed to {epic}")
+        if not self.is_connected.is_set():
+            logger.warning("Stream not connected. Attempting to connect...")
+            self.connect()
+            if not self.is_connected.is_set():
+                logger.error("Failed to connect for subscription.")
+                return
 
-    def _on_price_update(self, update):
+        self.callbacks[epic] = callback
+        logger.info(f"Restarting Node.js service to subscribe to {epic}")
+        # Kill current process and restart with new epic
+        self.stop()
+        # Need to ensure self.ig_client is authenticated again if it expires
+        self.connect_and_subscribe(epic, callback) # Recursive call, but should resolve quickly
+
+    def connect_and_subscribe(self, epic: str, callback: Callable[[dict], None]):
         """
-        Internal listener that forwards updates to the user callback.
+        Helper to connect and subscribe to a single epic.
         """
-        # 'update' is a lightstreamer ItemUpdate object
-        # We extract relevant data to a dictionary
-        data = {
-            "epic": update.name.replace("MARKET:", ""),
-            "bid": update.values.get("BID"),
-            "offer": update.values.get("OFFER"),
-            "market_state": update.values.get("MARKET_STATE")
-        }
+        self.callbacks[epic] = callback
         
-        if self.price_callback:
-            self.price_callback(data)
+        # Re-authenticate to get fresh tokens if needed
+        if not self.ig_client.authenticated:
+            self.ig_client.authenticate()
+
+        headers = self.ig_client.service.session.headers
+        cst = headers.get('CST')
+        xst = headers.get('X-SECURITY-TOKEN')
+        account_id = self.ig_client.service.account_id
+        
+        if not cst or not xst or not account_id:
+            raise ValueError("Could not find CST/XST tokens or account ID.")
+
+        script_path = "src/stream_service.js"
+        cmd = ["node", script_path, cst, xst, account_id, epic, self.ls_endpoint]
+        
+        logger.info(f"Spawning Node.js stream service for {epic}: {' '.join(cmd)}")
+        self.process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=1, text=True) # Ensure line-buffering
+        
+        self.reader_thread = threading.Thread(target=self._read_stdout, args=(self.process.stdout,))
+        self.reader_thread.daemon = True
+        self.reader_thread.start()
+        
+        if not self.is_connected.wait(timeout=10):
+            logger.warning(f"Node.js stream service for {epic} did not report CONNECTED status within timeout.")
+            self.stop()
+        else:
+            logger.info(f"Node.js stream service for {epic} connected successfully.")
+
 
     def stop(self):
         """
-        Disconnects the stream.
+        Stops the Node.js stream service subprocess.
         """
-        if self.subscription:
-            self.stream_service.unsubscribe(self.subscription)
-        if self.stream_service:
-            self.stream_service.disconnect()
-        logger.info("Stream stopped.")
+        if self.process and self.process.poll() is None:
+            logger.info("Terminating Node.js stream service.")
+            self.process.terminate() # or .kill()
+            self.process.wait(timeout=5)
+            if self.process.poll() is None:
+                logger.warning("Node.js stream service did not terminate gracefully. Killing.")
+                self.process.kill()
+            self.process = None
+            self.is_connected.clear() # Clear connection status
+        else:
+            logger.info("Node.js stream service not running or already stopped.")
+        
+        if self.reader_thread and self.reader_thread.is_alive():
+            self.reader_thread.join(timeout=2)
+            if self.reader_thread.is_alive():
+                logger.warning("Reader thread did not join gracefully.")
+            self.reader_thread = None
+        
+        logger.info("StreamManager stopped.")

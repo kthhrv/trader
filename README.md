@@ -1,99 +1,102 @@
-# AI-Driven Market Open Trader (IG Markets)
+# AI-Driven Market Open Trader
 
-A Python-based automated trading bot that leverages **Google Gemini** to analyze market data and **IG Markets** to execute trades during key market opens (London & New York).
+A fully automated trading bot that leverages Google's **Gemini 3 Pro Preview** (via `gemini-2.0-flash-thinking-exp` reasoning models) to analyze market opens and execute breakout strategies on the IG Markets platform.
 
-## 🚀 Features
+## 🚀 Key Features
 
-*   **AI-Powered Analysis:** Uses Google's Gemini models (via `google-generativeai`) to generate trading plans based on OHLC data and technical indicators.
-*   **Automated Scheduling:** Runs automatically for London (08:00 GMT) and New York (14:30 GMT) market opens.
-*   **On-Demand Mode:** Manually trigger analysis and execution for any instrument via CLI.
-*   **Risk Management:** Enforces stop losses, limits, and daily loss caps (configurable).
-*   **Real-Time Execution:** Uses Lightstreamer for tick-by-tick price monitoring to ensure precise entry.
-*   **Spread Betting:** Optimized for UK Spread Betting accounts (Tax-Free).
+*   **Multi-Market Support:** Pre-configured strategies for **London (FTSE 100)**, **New York (S&P 500)**, and **Tokyo (Nikkei 225)**.
+*   **AI Analyst (Gemini 3):** Uses **Chain-of-Thought** reasoning to synthesize technical data and news before making a decision.
+*   **Post-Mortem Analysis:** Generates detailed AI-powered reports on completed trades, analyzing execution, slippage, and plan adherence.
+*   **News Integration:** Real-time sentiment analysis using top headlines from Google News (via `feedparser`).
+*   **Technical Analysis:** Automatically calculates **ATR** (Volatility), **RSI** (Momentum), and **EMA** (Trend) using `pandas-ta`.
+*   **Risk Management:** Enforces mandatory Stop Losses, checks Risk/Reward ratios, and calculates dynamic position sizing based on account balance.
+*   **Database Logging:** Stores all trade decisions and real-time monitoring data in a local SQLite database for historical analysis.
+*   **Holiday Filter:** Automatically skips trading on public holidays for the UK, US, and Japan.
+*   **Timezone Aware:** Scheduler automatically handles DST shifts for London, NY, and Tokyo.
 
-## 🛠️ Prerequisites
+## 🛠 Tech Stack
 
-*   **Python 3.12+**
-*   **uv** (for fast Python package management)
-*   **IG Markets Account** (Demo or Live)
-*   **Google Gemini API Key**
+*   **Language:** Python 3.12+
+*   **AI Model:** Google Gemini (`gemini-3-pro-preview`)
+*   **Broker API:** IG Markets (via `trading-ig`)
+*   **Database:** SQLite (`data/trader.db`)
+*   **Data Processing:** `pandas`, `pandas-ta`
+*   **News Fetching:** `feedparser` (RSS)
+*   **Scheduling:** `APScheduler`
 
 ## 📦 Installation
 
-1.  **Clone the repository:**
-    ```bash
-    git clone <repository_url>
-    cd trader
-    ```
-
-2.  **Initialize the environment:**
+1.  Clone the repository.
+2.  Install dependencies using `uv` (recommended) or `pip`:
     ```bash
     uv sync
     ```
-
-3.  **Configure Environment Variables:**
-    Copy the example file and fill in your credentials.
-    ```bash
-    cp .env.example .env
-    ```
-    
-    Edit `.env`:
-    ```ini
-    # IG Markets Credentials
-    IG_API_KEY=your_ig_api_key
+3.  Set up your `.env` file (see `.env.example`):
+    ```env
     IG_USERNAME=your_username
     IG_PASSWORD=your_password
+    IG_API_KEY=your_api_key
     IG_ACC_ID=your_account_id
-
-    # Google Gemini AI
-    GEMINI_API_KEY=your_gemini_api_key
-
-    # Settings
-    IS_LIVE=false  # Set to 'true' for REAL MONEY trading
-    MAX_DAILY_LOSS=50.0
+    GEMINI_API_KEY=your_google_ai_key
+    IS_LIVE=false
     ```
 
-## 🖥️ Usage
+## 🖥 Usage
 
-### 1. Automated Scheduler (Default)
-Run the bot to listen for scheduled market opens:
+### 1. Scheduler Mode (Default)
+Run the bot to wait for scheduled market opens:
 ```bash
-uv run main.py
+python main.py
 ```
-*   **London Open:** Checks at 07:45 GMT.
-*   **NY Open:** Checks at 14:15 GMT.
+*   **London:** 07:45 London Time (Mon-Fri)
+*   **New York:** 09:15 NY Time (Mon-Fri)
+*   **Tokyo:** 08:45 Tokyo Time (Mon-Fri)
 
-### 2. On-Demand Execution (Manual)
-Run the strategy immediately for a specific instrument:
+### 2. Manual Execution (On-Demand)
+Run a strategy immediately for testing:
 ```bash
-uv run main.py --now --epic "CS.D.FTSE600.TODAY.IP"
+# Run London Strategy
+python main.py --now --market london
+
+# Run NY Strategy
+python main.py --now --market ny
+
+# Run Nikkei Strategy
+python main.py --now --market nikkei
 ```
 
-*   `--now`: Bypasses the scheduler.
-*   `--epic`: (Optional) Specify the instrument epic. Defaults to `CS.D.FTSE600.TODAY.IP`.
-
-## 🧪 Testing
-
-Run the test suite to verify logic without connecting to live APIs:
+### 3. Post-Trading Analysis
+Analyze recent performance:
 ```bash
-uv run pytest
+# View recent trades (Default 5)
+python main.py --recent-trades
+
+# View last 10 trades
+python main.py --recent-trades 10
+
+# Generate Post-Mortem Analysis for a specific Deal ID
+python main.py --post-mortem <DEAL_ID>
 ```
+
+### 4. News Check Only
+Fetch and print the latest market news without trading:
+```bash
+python main.py --news-only --market london
+```
+
+## 🛡 Safety Mechanisms
+
+*   **Paper Trading Default:** `IS_LIVE` defaults to `false`.
+*   **Mandatory Stops:** The engine refuses to place orders without a defined Stop Loss.
+*   **Chain-of-Thought:** The AI must justify its trade with a step-by-step rationale before generating a signal.
 
 ## 📂 Project Structure
 
-```
-/
-├── main.py                 # Entry point (CLI & Scheduler)
-├── config.py               # Configuration & Safety Flags
-├── .env                    # Secrets (Excluded from Git)
-├── pyproject.toml          # Dependencies (uv)
-├── src/
-│   ├── gemini_analyst.py   # AI Analysis Module
-│   ├── ig_client.py        # Broker Interaction (REST)
-│   ├── stream_manager.py   # Live Price Streaming
-│   └── strategy_engine.py  # Core Trading Logic
-└── tests/                  # Unit Tests
-```
+*   `src/strategy_engine.py`: Orchestrates data fetching, AI analysis, and execution.
+*   `src/gemini_analyst.py`: Wraps the Gemini API with Chain-of-Thought prompting.
+*   `src/ig_client.py`: Handles IG API authentication and order placement.
+*   `src/news_fetcher.py`: Fetches real-time news headlines.
+*   `main.py`: Entry point and scheduler configuration.
 
 ## ⚠️ Risk Warning
 
