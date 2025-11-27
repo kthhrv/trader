@@ -6,8 +6,9 @@ from src.database import get_db_connection, init_db
 logger = logging.getLogger(__name__)
 
 class TradeLoggerDB:
-    def __init__(self):
-        init_db() # Ensure DB exists
+    def __init__(self, db_path=None):
+        self.db_path = db_path
+        init_db(self.db_path) # Ensure DB exists
 
     def log_trade(self,
                    epic: str,
@@ -22,7 +23,7 @@ class TradeLoggerDB:
         timestamp = datetime.now().isoformat()
         
         try:
-            conn = get_db_connection()
+            conn = get_db_connection(self.db_path)
             cursor = conn.cursor()
             
             cursor.execute('''

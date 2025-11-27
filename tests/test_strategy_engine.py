@@ -87,7 +87,7 @@ def test_generate_plan_success(mock_components):
     mock_analyst.analyze_market.assert_called_once()
 
 def test_generate_plan_wait(mock_components, caplog):
-    mock_client, mock_analyst, mock_trade_logger, mock_trade_monitor, mock_market_status, mock_stream_manager = mock_components
+    mock_client, mock_analyst, mock_trade_logger, mock_trade_monitor, mock_market_status, mock_stream_manager, mock_engine = mock_components
 
     # Mock data fetch with real DataFrame (required for pandas-ta)
     data = {
@@ -125,7 +125,7 @@ def test_generate_plan_wait(mock_components, caplog):
     mock_trade_monitor.monitor_trade.assert_not_called()
 
 def test_generate_plan_holiday(mock_components, caplog):
-    mock_client, mock_analyst, _, _, mock_market_status, mock_stream_manager = mock_components
+    mock_client, mock_analyst, _, _, mock_market_status, mock_stream_manager, mock_engine = mock_components
     
     # Simulate a holiday
     mock_market_status.is_holiday.return_value = True
@@ -144,7 +144,7 @@ def test_generate_plan_holiday(mock_components, caplog):
     mock_analyst.analyze_market.assert_not_called()
 
 def test_poll_market_triggers_buy(mock_components):
-    mock_client, _, mock_trade_logger, mock_trade_monitor, _, mock_stream_manager = mock_components
+    mock_client, _, mock_trade_logger, mock_trade_monitor, _, mock_stream_manager, mock_engine = mock_components
     engine = StrategyEngine("EPIC")
     
     # Setup active plan
@@ -209,7 +209,7 @@ def test_poll_market_triggers_buy(mock_components):
     mock_stream_manager.stop.assert_called_once()
 
 def test_poll_market_no_trigger(mock_components):
-    mock_client, _, mock_trade_logger, mock_trade_monitor, _, mock_stream_manager = mock_components
+    mock_client, _, mock_trade_logger, mock_trade_monitor, _, mock_stream_manager, mock_engine = mock_components
     engine = StrategyEngine("EPIC")
     
     engine.active_plan = TradingSignal(
@@ -243,7 +243,7 @@ def test_poll_market_no_trigger(mock_components):
     mock_stream_manager.stop.assert_called_once()
 
 def test_place_market_order_spread_too_wide(mock_components, caplog):
-    mock_client, _, mock_trade_logger, mock_trade_monitor, _, mock_stream_manager = mock_components
+    mock_client, _, mock_trade_logger, mock_trade_monitor, _, mock_stream_manager, mock_engine = mock_components
     engine = StrategyEngine("EPIC", max_spread=1.0) # Set max_spread
     
     # Setup active plan
@@ -274,33 +274,30 @@ def test_place_market_order_spread_too_wide(mock_components, caplog):
             })
         mock_stream_manager.connect_and_subscribe.side_effect = mock_connect_and_subscribe
 
-        with caplog.at_level(logging.WARNING):
+        with caplog.at_level(logging.INFO):
             # Execute strategy, which will start the stream and wait for updates
             engine.execute_strategy(timeout_seconds=0.1) # Short timeout
-            
+        
             # Verify stream manager was called to connect and subscribe
             mock_stream_manager.connect_and_subscribe.assert_called_once_with(
                 engine.epic, engine._stream_price_update_handler
             )
-            
+        
             # Verify that no trade was placed
             mock_client.place_spread_bet_order.assert_not_called()
-            mock_calculate_size.assert_called_once()
+            mock_calculate_size.assert_not_called()
             assert engine.position_open is False
-        
-        # Verify a warning was logged
-        assert "Spread 10.0 for EPIC is too wide" in caplog.text
 
-        mock_trade_logger.log_trade.assert_called_once()
-        log_trade_args = mock_trade_logger.log_trade.call_args[1]
-        assert log_trade_args['epic'] == engine.epic
-        assert log_trade_args['outcome'] == "SKIPPED_WIDE_SPREAD"
-        assert log_trade_args['is_dry_run'] == False # Assuming not in dry run mode for this test
+                
+
+        # Verify a warning was logged
+        assert "SKIPPED: Spread (10.0) is wider than max allowed (1.0)" in caplog.text
+        
+        mock_trade_logger.log_trade.assert_not_called()
         mock_trade_monitor.monitor_trade.assert_not_called()
         mock_stream_manager.stop.assert_called_once()
-
 def test_place_market_order_stop_too_tight(mock_components, caplog):
-    mock_client, _, mock_trade_logger, mock_trade_monitor, _, mock_stream_manager = mock_components
+    mock_client, _, mock_trade_logger, mock_trade_monitor, _, mock_stream_manager, mock_engine = mock_components
     engine = StrategyEngine("EPIC")
     
     # Setup active plan with a tight stop relative to ATR
@@ -358,7 +355,7 @@ def test_place_market_order_stop_too_tight(mock_components, caplog):
         mock_stream_manager.stop.assert_called_once()
 
 def test_place_market_order_dry_run(mock_components, caplog):
-    mock_client, _, mock_trade_logger, mock_trade_monitor, _, mock_stream_manager = mock_components
+    mock_client, _, mock_trade_logger, mock_trade_monitor, _, mock_stream_manager, mock_engine = mock_components
     engine = StrategyEngine("EPIC", dry_run=True) # Set dry_run to True
 
     # Setup active plan

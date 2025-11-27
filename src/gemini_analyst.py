@@ -4,16 +4,11 @@ import typing_extensions as typing
 from pydantic import BaseModel, Field
 from enum import Enum
 import json
+from config import GEMINI_API_KEY
 
-# Configure the SDK to use Vertex AI as the backend
-# This uses your Application Default Credentials and project for billing.
-try:
-    genai.configure(
-        transport='vertex_ai',
-        project='keith-gemini-cli-test-01',
-    )
-except Exception as e:
-    print(f"Failed to configure Gemini with Vertex AI transport: {e}")
+# Configure the SDK
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
 
 
 class Action(str, Enum):
@@ -217,7 +212,16 @@ if __name__ == "__main__":
     Resistance: 7520
     """
 
-    analyst = GeminiAnalyst()
-    result = analyst.analyze_market(mock_data)
-    print("Analysis Result:")
-    print(result.model_dump_json(indent=2) if result else "Failed")
+    if GEMINI_API_KEY:
+
+        analyst = GeminiAnalyst()
+
+        result = analyst.analyze_market(mock_data)
+
+        print("Analysis Result:")
+
+        print(result.model_dump_json(indent=2) if result else "Failed")
+
+    else:
+
+        print("Skipping manual test: No GEMINI_API_KEY found.")

@@ -7,16 +7,21 @@ from src.database import get_db_connection
 logger = logging.getLogger(__name__)
 
 class TradeMonitorDB:
-    def __init__(self, client: IGClient):
+    def __init__(self, client: IGClient, db_path=None, polling_interval: int = 5):
         self.client = client
+        self.db_path = db_path
+        self.polling_interval = polling_interval
 
-    def monitor_trade(self, deal_id: str, epic: str, polling_interval: int = 5, max_duration: int = 14400):
+    def monitor_trade(self, deal_id: str, epic: str, polling_interval: int = None, max_duration: int = 14400):
         """
         Monitors an active trade by polling position status and market price.
         Logs data to the SQLite database until the trade is closed or max_duration expires.
         max_duration default: 4 hours (14400 seconds).
         """
-        logger.info(f"Starting DB monitoring for Deal ID: {deal_id}")
+        if polling_interval is None:
+            polling_interval = self.polling_interval
+
+        logger.info(f"Starting DB monitoring for Deal ID: {deal_id} (Poll: {polling_interval}s)")
         
         start_time = time.time()
         active = True
@@ -103,7 +108,10 @@ class TradeMonitorDB:
 
     def _log_to_db(self, deal_id, bid, offer, pnl, status):
         try:
-            conn = get_db_connection()
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(f"Logging to DB: {self.db_path} | Deal: {deal_id} Status: {status}")
+                
+            conn = get_db_connection(self.db_path)
             cursor = conn.cursor()
             
             cursor.execute('''

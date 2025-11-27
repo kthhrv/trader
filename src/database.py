@@ -7,26 +7,28 @@ logger = logging.getLogger(__name__)
 
 DB_PATH = "data/trader.db"
 
-def get_db_connection():
+def get_db_connection(db_path=None):
     """
     Establishes and returns a connection to the SQLite database.
     """
+    path = db_path if db_path else DB_PATH
     # Ensure the data directory exists
-    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(path)
         conn.row_factory = sqlite3.Row # Return rows as dictionary-like objects
         return conn
     except Exception as e:
         logger.error(f"Failed to connect to database: {e}")
         raise
 
-def init_db():
+def init_db(db_path=None):
     """
     Initializes the database schema.
     """
-    conn = get_db_connection()
+    logger.info(f"Initializing database at: {db_path if db_path else DB_PATH}")
+    conn = get_db_connection(db_path)
     cursor = conn.cursor()
     
     # Table for Trade Logs (formerly trade_log.csv)
@@ -74,12 +76,12 @@ def init_db():
     conn.close()
     logger.info(f"Database initialized at {DB_PATH}")
 
-def fetch_trade_data(deal_id: str):
+def fetch_trade_data(deal_id: str, db_path=None):
     """
     Fetches complete data for a trade (log + monitoring) by deal_id.
     Returns a dictionary with 'log' and 'monitor' keys.
     """
-    conn = get_db_connection()
+    conn = get_db_connection(db_path)
     cursor = conn.cursor()
     
     try:

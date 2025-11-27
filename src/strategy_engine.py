@@ -15,9 +15,17 @@ from src.stream_manager import StreamManager # Import the new StreamManager
 logger = logging.getLogger(__name__)
 
 class StrategyEngine:
-    def __init__(self, epic: str, strategy_name: str = "Market Open", news_query: str = None, dry_run: bool = False, verbose: bool = False, max_spread: float = 2.0):
+    def __init__(self, epic: str, strategy_name: str = "Market Open", news_query: str = None, dry_run: bool = False, verbose: bool = False, max_spread: float = 2.0,
+                 ig_client: Optional[IGClient] = None,
+                 analyst: Optional[GeminiAnalyst] = None,
+                 news_fetcher: Optional[NewsFetcher] = None,
+                 trade_logger: Optional[TradeLoggerDB] = None,
+                 trade_monitor: Optional[TradeMonitorDB] = None,
+                 market_status: Optional[MarketStatus] = None,
+                 stream_manager: Optional[StreamManager] = None):
         """
         Orchestrates the trading workflow for a single instrument.
+        Supports Dependency Injection for testing.
         """
         self.epic = epic
         self.strategy_name = strategy_name
@@ -25,20 +33,22 @@ class StrategyEngine:
         self.dry_run = dry_run
         self.verbose = verbose
         self.max_spread = max_spread
-        self.client = IGClient()
-        self.analyst = GeminiAnalyst()
-        self.news_fetcher = NewsFetcher()
-        self.market_status = MarketStatus() # Initialize Market Status
-        self.trade_logger = TradeLoggerDB() # Instantiate the Database Logger
-        self.trade_monitor = TradeMonitorDB(self.client) # Instantiate Database Monitor
-        self.stream_manager = StreamManager(self.client) # Instantiate the new StreamManager
+        
+        self.client = ig_client if ig_client else IGClient()
+        self.analyst = analyst if analyst else GeminiAnalyst()
+        self.news_fetcher = news_fetcher if news_fetcher else NewsFetcher()
+        self.market_status = market_status if market_status else MarketStatus()
+        self.trade_logger = trade_logger if trade_logger else TradeLoggerDB()
+        self.trade_monitor = trade_monitor if trade_monitor else TradeMonitorDB(self.client)
+        self.stream_manager = stream_manager if stream_manager else StreamManager(self.client)
+        
         self.vix_epic = "CC.D.VIX.USS.IP"
         
         self.active_plan: Optional[TradingSignal] = None
         self.position_open = False
-        # self.polling_interval = 2 # seconds - Polling removed, using stream now
         self.current_bid: float = 0.0
         self.current_offer: float = 0.0
+        self.last_skipped_log_time: float = 0.0 # For rate-limiting skipped logs
         
     def generate_plan(self):
         """
@@ -66,11 +76,11 @@ class StrategyEngine:
             
             # Calculate Indicators
             # ATR(14) - Volatility
-            df['ATR'] = df.ta.atr(length=14)
+            df['ATR'] = ta.atr(df['high'], df['low'], df['close'], length=14)
             # RSI(14) - Momentum
-            df['RSI'] = df.ta.rsi(length=14)
+            df['RSI'] = ta.rsi(df['close'], length=14)
             # EMA(20) - Trend
-            df['EMA_20'] = df.ta.ema(length=20)
+            df['EMA_20'] = ta.ema(df['close'], length=20)
 
             # Get the latest complete candle
             latest = df.iloc[-1]
@@ -156,12 +166,13 @@ class StrategyEngine:
         Step 2: Uses the streaming API to monitor prices and triggers Market Order when level is hit.
         """
         if not self.active_plan:
-            logger.warning("No active plan to execute.")
+            logger.info("SKIPPED: No active plan to execute.")
             return
 
         logger.info(f"Starting execution monitor (Streaming price updates). Timeout in {timeout_seconds}s...")
         
         start_time = time.time()
+        last_log_time = start_time
         plan = self.active_plan
         
         try:
@@ -175,35 +186,51 @@ class StrategyEngine:
                     logger.info(f"Strategy for {self.epic} timed out after {timeout_seconds}s. No trade executed.")
                     break # Exit loop on timeout
                 
-                # Check for updates from the stream. _stream_price_update_handler updates self.current_bid/offer
-                # We need a small sleep here to avoid busy-waiting, but the stream is async
-                time.sleep(0.1) # Small sleep to yield CPU, stream updates happen on separate thread
-                
+                # Sleep for a short duration to prevent busy-spinning and reduce CPU usage.
+                # The stream handler will update prices in the background.
+                time.sleep(0.1)
+
                 if self.current_bid == 0 or self.current_offer == 0:
-                    if self.verbose: # Log only if in verbose mode, to avoid spam
-                        logger.info(f"POLLING ({self.epic}): Waiting for valid stream prices. Current Bid={self.current_bid}, Offer={self.current_offer}")
                     continue
 
-                if self.verbose:
-                    logger.info(f"POLLING ({self.epic}): Target={plan.entry}, Bid={self.current_bid}, Offer={self.current_offer}")
+                # Log status every 10 seconds to show it's alive
+                current_time = time.time()
+                if current_time - last_log_time > 10:
+                    logger.info(f"MONITORING ({self.epic}): Target Entry={plan.entry}, Current Offer={self.current_offer}, Current Bid={self.current_bid} (Loop Status)")
+                    last_log_time = current_time
                 
-                # Trigger Logic (moved from _poll_market)
+                # DEBUG: Log current prices and entry on every iteration
+                logger.debug(f"DEBUG-EXEC: Epic={self.epic}, Current Bid={self.current_bid}, Current Offer={self.current_offer}, Target Entry={plan.entry}, Action={plan.action.value}")
+
+                # --- Spread and Trigger Logic ---
+                current_spread = round(abs(self.current_offer - self.current_bid), 2)
                 triggered = False
+
+                if current_spread > self.max_spread:
+                    current_time = time.time()
+                    if current_time - self.last_skipped_log_time > 5: # Log at most every 5 seconds
+                        logger.info(f"SKIPPED: Spread ({current_spread}) is wider than max allowed ({self.max_spread}). Holding off trigger for {self.epic}.")
+                        self.last_skipped_log_time = current_time
+                    continue # Skip to next iteration, don't check price trigger
                 
                 if plan.action == Action.BUY:
                     # Buy if Offer price moves UP to our entry level
                     if self.current_offer >= plan.entry:
                         triggered = True
-                        logger.info(f"BUY TRIGGERED: Offer {self.current_offer} >= Entry {plan.entry}")
+                        logger.info(f"BUY TRIGGERED: Offer {self.current_offer} >= Entry {plan.entry} (Spread: {current_spread})")
                         
                 elif plan.action == Action.SELL:
                     # Sell if Bid price moves DOWN to our entry level
                     if self.current_bid <= plan.entry:
                         triggered = True
-                        logger.info(f"SELL TRIGGERED: Bid {self.current_bid} <= Entry {plan.entry}")
+                        logger.info(f"SELL TRIGGERED: Bid {self.current_bid} <= Entry {plan.entry} (Spread: {current_spread})")
                 
                 if triggered:
-                    self._place_market_order(plan, dry_run=self.dry_run)
+                    success = self._place_market_order(plan, current_spread, dry_run=self.dry_run)
+                    if not success:
+                        logger.info("Trade attempt failed or was skipped. Halting further attempts for this plan.")
+                    # Whether successful or not, we break after one attempt.
+                    break # Exit the monitoring loop
                     
         except KeyboardInterrupt:
             logger.info("Execution stopped by user.")
@@ -225,11 +252,8 @@ class StrategyEngine:
         if epic == self.epic:
             self.current_bid = bid
             self.current_offer = offer
-            # Optionally log verbose stream data here if needed for deeper debugging
-            # if self.verbose:
-            #     logger.debug(f"Stream Update: {epic} Bid={bid} Offer={offer} State={market_state}")
 
-    def _get_news_query(self, epic: str) -> str:
+    def _calculate_size(self, entry: float, stop_loss: float) -> float:
         """
         Calculates position size based on account risk.
         Formula: Size = (Account Balance * Risk %) / Stop Distance
@@ -297,10 +321,11 @@ class StrategyEngine:
             logger.error(f"Error calculating size: {e}. Defaulting to 0.5")
             return 0.5
 
-    def _place_market_order(self, plan: TradingSignal, dry_run: bool):
+    def _place_market_order(self, plan: TradingSignal, current_spread: float, dry_run: bool) -> bool:
         """
         Executes the trade via IG Client as a Market Order (Spread Bet),
         or simulates it if dry_run is True.
+        Returns True if order placed/simulated, False if skipped/failed.
         """
         try:
             logger.info("Placing MARKET order...")
@@ -309,7 +334,7 @@ class StrategyEngine:
             
             if plan.stop_loss is None:
                 logger.warning("Mandatory stop_loss is missing from the plan. Cannot place order.")
-                return
+                return False
 
             # --- Stop vs. ATR Check ---
             if plan.atr and plan.atr > 0:
@@ -331,37 +356,6 @@ class StrategyEngine:
             # Log the final calculated size
             logger.info(f"Final calculated trade size for {self.epic}: {size}")
             # --- End Dynamic Sizing ---
-
-            # --- Spread Check ---
-            current_market_details = self.client.service.fetch_market_by_epic(self.epic)
-            if not current_market_details or 'snapshot' not in current_market_details:
-                logger.warning(f"Could not fetch latest market snapshot for spread check on {self.epic}. Skipping order.")
-                return
-            
-            current_bid = float(current_market_details['snapshot'].get('bid') or 0)
-            current_offer = float(current_market_details['snapshot'].get('offer') or 0)
-            
-            if current_bid == 0 or current_offer == 0:
-                logger.warning(f"Invalid bid/offer for spread check on {self.epic}. Skipping order.")
-                return
-                
-            current_spread = round(abs(current_offer - current_bid), 2)
-            
-            if current_spread > self.max_spread:
-                if dry_run:
-                    logger.info(f"DRY RUN: Order would have been SKIPPED due to wide spread ({current_spread} > {self.max_spread}) for {self.epic}.")
-                else:
-                    logger.warning(f"Spread {current_spread} for {self.epic} is too wide (Max Allowed: {self.max_spread}). Skipping order.")
-                # Log the skipped trade
-                self.trade_logger.log_trade(
-                    epic=self.epic,
-                    plan=plan,
-                    outcome="SKIPPED_WIDE_SPREAD",
-                    spread_at_entry=current_spread,
-                    is_dry_run=dry_run
-                )
-                return
-            # --- End Spread Check ---
 
             if dry_run:
                 logger.info(f"DRY RUN: Order would have been PLACED for {direction} {size} {self.epic} at entry {plan.entry} (Stop: {plan.stop_loss}, TP: {plan.take_profit}). Spread: {current_spread}.")
@@ -399,6 +393,8 @@ class StrategyEngine:
                 is_dry_run=dry_run,
                 deal_id=deal_id
             )
+            return True
             
         except Exception as e:
             logger.error(f"Failed to execute trade: {e}")
+            return False

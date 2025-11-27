@@ -22,11 +22,11 @@ IG_USERNAME = os.getenv("IG_USERNAME")
 IG_PASSWORD = os.getenv("IG_PASSWORD")
 IG_ACC_ID = os.getenv("IG_ACC_ID")
 
-# GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 # --- Configuration Checks ---
-#if not GEMINI_API_KEY:
-#    print("WARNING: GEMINI_API_KEY is not set.")
+if not GEMINI_API_KEY:
+    print("WARNING: GEMINI_API_KEY is not set.")
 
 if IS_LIVE:
     print("WARNING: RUNNING IN LIVE TRADING MODE.")
