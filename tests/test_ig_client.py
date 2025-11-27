@@ -102,7 +102,7 @@ def test_fetch_historical_data_success(mock_ig_service):
     assert isinstance(df, pd.DataFrame)
     assert not df.empty
     mock_instance.fetch_historical_prices_by_epic_and_num_points.assert_called_with(
-        "CS.D.GBPUSD.TODAY.IP", "15Min", 10
+        "CS.D.GBPUSD.TODAY.IP", "M15", 10
     )
 
 def test_place_spread_bet_order_success(mock_ig_service):

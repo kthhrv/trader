@@ -8,47 +8,46 @@ class TestTradeMonitorDB(unittest.TestCase):
         self.mock_client = MagicMock()
         self.monitor = TradeMonitorDB(self.mock_client)
 
-    @patch('src.trade_monitor_db.get_db_connection')
+    @patch('src.trade_monitor_db.update_trade_outcome')
     @patch('time.sleep', return_value=None)
-    def test_monitor_trade_flow(self, mock_sleep, mock_get_conn):
-        # Setup DB mock
-        mock_conn = MagicMock()
-        mock_cursor = MagicMock()
-        mock_get_conn.return_value = mock_conn
-        mock_conn.cursor.return_value = mock_cursor
-        
+    def test_monitor_trade_flow(self, mock_sleep, mock_update_db):
         # Setup IG Client mock behavior
-        # 1. Open Position
-        # 2. Closed (None)
+        # 1. Open Position (loop continues)
+        # 2. Closed (None) -> loop breaks, update db
         self.mock_client.fetch_open_position_by_deal_id.side_effect = [
             {'profitAndLoss': 10, 'bid': 100, 'offer': 101},
             None
         ]
         self.mock_client.get_market_info.return_value = {'snapshot': {'bid': 102, 'offer': 103}}
-        self.mock_client.fetch_transaction_history_by_deal_id.return_value = None # Mock history fetch
+        
+        # Mock transaction history return
+        mock_history_df = MagicMock()
+        mock_history_df.empty = False
+        mock_history_df.columns = ['profitAndLoss', 'closeLevel']
+        mock_history_df.iloc.__getitem__.return_value = {'profitAndLoss': '£50.5', 'closeLevel': 105.0}
+        self.mock_client.fetch_transaction_history_by_deal_id.return_value = mock_history_df
         
         self.monitor.monitor_trade("DEAL123", "EPIC", polling_interval=0.1)
         
-        # Should be called twice: once for open state, once for closed state
-        self.assertEqual(mock_cursor.execute.call_count, 2)
+        # Should be called ONCE: only when status is CLOSED
+        mock_update_db.assert_called_once()
         
-        # Check first insert (Open)
-        args1 = mock_cursor.execute.call_args_list[0][0]
-        self.assertIn("INSERT INTO trade_monitor", args1[0])
-        self.assertEqual(args1[1][0], "DEAL123")
-        self.assertEqual(args1[1][2], 100) # bid
-        self.assertEqual(args1[1][5], "OPEN")
-        
-        # Check second insert (Closed)
-        args2 = mock_cursor.execute.call_args_list[1][0]
-        self.assertEqual(args2[1][2], 102) # final bid from snapshot
-        self.assertEqual(args2[1][5], "CLOSED")
+        # Check args
+        args = mock_update_db.call_args[0]
+        # deal_id, exit_price, pnl, exit_time, outcome, db_path
+        self.assertEqual(args[0], "DEAL123")
+        self.assertEqual(args[1], 105.0) # exit_price from history
+        self.assertEqual(args[2], 50.5)  # pnl from history
+        # outcome is passed as a keyword argument
+        kwargs = mock_update_db.call_args[1]
+        self.assertEqual(kwargs['outcome'], "CLOSED")
 
-    @patch('src.trade_monitor_db.get_db_connection')
-    def test_log_to_db_exception(self, mock_get_conn):
-        mock_get_conn.side_effect = Exception("DB Fail")
-        # Should catch exception and log error
-        self.monitor._log_to_db("DEAL", 1, 2, 3, "OPEN")
+    @patch('src.trade_monitor_db.update_trade_outcome')
+    def test_update_db_exception(self, mock_update_db):
+        mock_update_db.side_effect = Exception("DB Fail")
+        # Should catch exception and log error, not crash
+        self.monitor._update_db("DEAL", 100, 50, "time", "CLOSED")
+        mock_update_db.assert_called_once()
 
 if __name__ == '__main__':
     unittest.main()

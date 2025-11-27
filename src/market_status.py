@@ -1,6 +1,7 @@
 import logging
-from datetime import date
+from datetime import date, timedelta
 import holidays
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -20,55 +21,60 @@ class MarketStatus:
             
         self.jp_holidays = holidays.Japan()
 
-    def is_holiday(self, epic: str, check_date: date = None) -> bool:
+    def _get_country_code(self, epic: str) -> Optional[str]:
+        """
+        Maps an IG epic to a country code for holiday lookup.
+        """
+        if "FTSE" in epic:
+            return "UK"
+        elif "SPX" in epic or "US500" in epic or "WALL" in epic or "NASDAQ" in epic or "US30" in epic or "SPTRD" in epic:
+            return "US"
+        elif "NIKKEI" in epic or "JAPAN" in epic:
+            return "JP"
+        elif "DAX" in epic or "DE30" in epic:
+            return "DE" # Assuming Germany for DAX
+        return None
+
+    def is_holiday(self, epic: str) -> bool:
         """
         Determines if the market associated with the epic is closed due to a holiday.
         
         Args:
             epic (str): The instrument epic (e.g., "IX.D.FTSE.DAILY.IP").
-            check_date (date, optional): The date to check. Defaults to today.
             
         Returns:
             bool: True if it is a holiday, False otherwise.
         """
-        if check_date is None:
-            check_date = date.today()
-            
-        # Determine country based on epic
-        if "FTSE" in epic:
-            is_hol = check_date in self.uk_holidays
-            country = "UK"
-        elif "SPX" in epic or "US500" in epic or "WALL" in epic or "NASDAQ" in epic or "US30" in epic or "SPTRD" in epic:
-            is_hol = check_date in self.us_holidays
-            country = "US"
-        elif "NIKKEI" in epic or "JAPAN" in epic:
-            is_hol = check_date in self.jp_holidays
-            country = "Japan"
-        elif "DAX" in epic or "DE30" in epic:
-            # Add Germany if needed, for now default False or add holidays.Germany()
-            # self.de_holidays = holidays.Germany()
-            # is_hol = check_date in self.de_holidays
-            is_hol = False # Default for now
-            country = "Germany"
-        else:
-            # Default to False if unknown market, but log warning
+        current_date = date.today()
+        country_code = self._get_country_code(epic)
+
+        if not country_code:
             logger.warning(f"Unknown market for epic {epic}. Assuming open.")
             return False
 
+        is_hol = False
+        holiday_name = None
+
+        if country_code == "UK":
+            if current_date in self.uk_holidays:
+                is_hol = True
+                holiday_name = self.uk_holidays.get(current_date)
+        elif country_code == "US":
+            if current_date in self.us_holidays:
+                is_hol = True
+                holiday_name = self.us_holidays.get(current_date)
+        elif country_code == "JP":
+            if current_date in self.jp_holidays:
+                is_hol = True
+                holiday_name = self.jp_holidays.get(current_date)
+        elif country_code == "DE":
+            # For now, default German holidays to False unless a specific library is used
+            is_hol = False
+            holiday_name = "German Public Holiday (Not checked)"
+
         if is_hol:
-            holiday_name = self._get_holiday_name(country, check_date)
-            logger.info(f"Market {country} is CLOSED today ({check_date}) for {holiday_name}. Trading skipped.")
+            logger.info(f"Market {country_code} is CLOSED today ({current_date}) for {holiday_name if holiday_name else 'Public Holiday'}. Trading skipped.")
             return True
         else:
-            logger.info(f"Market {country} is OPEN today ({check_date}).")
-            
-        return False
-
-    def _get_holiday_name(self, country: str, check_date: date) -> str:
-        if country == "UK":
-            return self.uk_holidays.get(check_date)
-        elif country == "US":
-            return self.us_holidays.get(check_date)
-        elif country == "Japan":
-            return self.jp_holidays.get(check_date)
-        return "Public Holiday"
+            # logger.info(f"Market {country_code} is OPEN today ({current_date}).") # Too verbose for regular logging
+            return False

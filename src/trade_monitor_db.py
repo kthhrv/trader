@@ -2,7 +2,7 @@ import logging
 import time
 from datetime import datetime
 from src.ig_client import IGClient
-from src.database import get_db_connection
+from src.database import update_trade_outcome
 
 logger = logging.getLogger(__name__)
 
@@ -14,8 +14,8 @@ class TradeMonitorDB:
 
     def monitor_trade(self, deal_id: str, epic: str, polling_interval: int = None, max_duration: int = 14400):
         """
-        Monitors an active trade by polling position status and market price.
-        Logs data to the SQLite database until the trade is closed or max_duration expires.
+        Monitors an active trade by polling position status.
+        Updates the trade_log table when the trade is closed or max_duration expires.
         max_duration default: 4 hours (14400 seconds).
         """
         if polling_interval is None:
@@ -41,61 +41,35 @@ class TradeMonitorDB:
                 
                 status = "OPEN"
                 pnl = 0.0
-                current_bid = 0.0
-                current_offer = 0.0
+                exit_price = 0.0
                 
                 if position:
-                    # Parse position data
-                    pnl = float(position.get('profitAndLoss', 0.0))
-                    current_bid = float(position.get('bid', 0.0))
-                    current_offer = float(position.get('offer', 0.0))
-                    
-                    if current_bid == 0 and current_offer == 0:
-                        # Fallback to market snapshot
-                        market = self.client.get_market_info(epic)
-                        if market and 'snapshot' in market:
-                            current_bid = float(market['snapshot'].get('bid', 0.0))
-                            current_offer = float(market['snapshot'].get('offer', 0.0))
+                    # Still open, just continue polling
+                    pass
                 else:
                     # Position not found -> Closed
                     status = "CLOSED"
                     active = False
                     
-                    # Attempt to fetch realized PnL from history
+                    # Attempt to fetch realized PnL and exit details from history
                     try:
                         # Fetch recent history
                         history_df = self.client.fetch_transaction_history_by_deal_id(deal_id)
                         if history_df is not None and not history_df.empty:
-                            # Filter for 'DEAL' type and matching instrument/date if possible
-                            # For now, we assume the most recent 'DEAL' closing transaction for this epic is ours
-                            # This is a heuristic; perfect matching requires parsing the 'reference' field deeper or more API calls
-                            # Sort by date descending
-                            if 'date' in history_df.columns:
-                                history_df = history_df.sort_values('date', ascending=False)
-                            
-                            # Look for the first record with a non-zero PnL for this epic (if column available)
-                            # Columns usually: date, instrumentName, period, profitAndLoss, transactionType, reference, openDateUtc...
-                            
-                            # Check if we can filter by epic/instrumentName
-                            # history_df['instrumentName'] might contain the epic or name
-                            
-                            # Take the first record's PnL as the "realized" PnL for now
-                            # This assumes the bot is monitoring one active trade per instrument mostly
                             if 'profitAndLoss' in history_df.columns:
-                                potential_pnl = float(history_df.iloc[0]['profitAndLoss'].replace('£', '').replace(',', '')) # Clean string currency
-                                pnl = potential_pnl
+                                val_str = str(history_df.iloc[0]['profitAndLoss']).replace('£', '').replace(',', '')
+                                pnl = float(val_str)
                                 logger.info(f"Fetched realized PnL from history: {pnl}")
+                            
+                            # Try to get exit price if available in history columns
+                            # For now, we might not have it easily, so we can default to 0 or try to parse
+                            if 'closeLevel' in history_df.columns:
+                                exit_price = float(history_df.iloc[0]['closeLevel'])
                     except Exception as e:
                         logger.warning(f"Could not fetch realized PnL from history: {e}")
 
-                    # Fetch one last price for closure record
-                    market = self.client.get_market_info(epic)
-                    if market and 'snapshot' in market:
-                        current_bid = float(market['snapshot'].get('bid', 0.0))
-                        current_offer = float(market['snapshot'].get('offer', 0.0))
-                
-                # 2. Log Data to DB
-                self._log_to_db(deal_id, current_bid, current_offer, pnl, status)
+                    # Update the main trade log with the outcome
+                    self._update_db(deal_id, exit_price, pnl, datetime.now().isoformat(), status)
                 
                 if active:
                     time.sleep(polling_interval)
@@ -106,27 +80,18 @@ class TradeMonitorDB:
 
         logger.info(f"Trade {deal_id} CLOSED. Monitoring finished.")
 
-    def _log_to_db(self, deal_id, bid, offer, pnl, status):
+    def _update_db(self, deal_id, exit_price, pnl, exit_time, status):
+        """
+        Updates the trade_log with closure details.
+        """
         try:
-            if logger.isEnabledFor(logging.DEBUG):
-                logger.debug(f"Logging to DB: {self.db_path} | Deal: {deal_id} Status: {status}")
-                
-            conn = get_db_connection(self.db_path)
-            cursor = conn.cursor()
-            
-            cursor.execute('''
-                INSERT INTO trade_monitor (deal_id, timestamp, bid, offer, pnl, status)
-                VALUES (?, ?, ?, ?, ?, ?)
-            ''', (
-                deal_id,
-                datetime.now().isoformat(),
-                bid,
-                offer,
-                pnl,
-                status
-            ))
-            
-            conn.commit()
-            conn.close()
+            update_trade_outcome(
+                deal_id, 
+                exit_price, 
+                pnl, 
+                exit_time, 
+                outcome=status, 
+                db_path=self.db_path
+            )
         except Exception as e:
-            logger.error(f"Failed to log monitor data to DB: {e}")
+            logger.error(f"Failed to update trade outcome in DB: {e}")

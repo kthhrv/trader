@@ -23,19 +23,27 @@ def test_trade_monitor_uses_custom_db_path(temp_db):
     # Verify attribute is set
     assert monitor.db_path == temp_db
     
-    # Perform a log operation
-    deal_id = "TEST_MONITOR_DEAL"
-    monitor._log_to_db(deal_id, 1.0, 1.1, 0.0, "OPEN")
-    
-    # Verify data is in the temp db
+    # Prepare DB with an initial entry
     conn = sqlite3.connect(temp_db)
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM trade_monitor WHERE deal_id = ?", (deal_id,))
+    deal_id = "TEST_MONITOR_DEAL"
+    cursor.execute("INSERT INTO trade_log (deal_id, outcome) VALUES (?, ?)", (deal_id, "OPEN"))
+    conn.commit()
+    conn.close()
+
+    # Perform an update operation
+    monitor._update_db(deal_id, 100.0, 50.0, "2023-01-01", "CLOSED")
+    
+    # Verify data is updated in the temp db
+    conn = sqlite3.connect(temp_db)
+    cursor = conn.cursor()
+    cursor.execute("SELECT outcome, pnl FROM trade_log WHERE deal_id = ?", (deal_id,))
     row = cursor.fetchone()
     conn.close()
     
     assert row is not None
-    assert row[1] == deal_id # Check deal_id column
+    assert row[0] == "CLOSED"
+    assert row[1] == 50.0
 
 def test_trade_logger_uses_custom_db_path(temp_db):
     logger_db = TradeLoggerDB(db_path=temp_db)

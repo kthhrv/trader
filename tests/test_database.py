@@ -35,11 +35,7 @@ class TestDatabase(unittest.TestCase):
             
             # Check tables exist
             cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='trade_log'")
-            self.assertIsNotNone(cursor.fetchone())
-            
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='trade_monitor'")
-            self.assertIsNotNone(cursor.fetchone())
-            
+            self.assertIsNotNone(cursor.fetchone())            
             # Check columns (migration test)
             cursor.execute("PRAGMA table_info(trade_log)")
             columns = [row[1] for row in cursor.fetchall()]
@@ -86,8 +82,7 @@ class TestDatabase(unittest.TestCase):
             
             deal_id = "test_deal_123"
             cursor.execute("INSERT INTO trade_log (deal_id, epic) VALUES (?, ?)", (deal_id, "TEST.EPIC"))
-            cursor.execute("INSERT INTO trade_monitor (deal_id, timestamp, bid) VALUES (?, ?, ?)", (deal_id, "T1", 100))
-            cursor.execute("INSERT INTO trade_monitor (deal_id, timestamp, bid) VALUES (?, ?, ?)", (deal_id, "T2", 101))
+            
             conn.commit()
             conn.close()
             
@@ -95,8 +90,6 @@ class TestDatabase(unittest.TestCase):
             data = fetch_trade_data(deal_id)
             self.assertIsNotNone(data)
             self.assertEqual(data['log']['epic'], "TEST.EPIC")
-            self.assertEqual(len(data['monitor']), 2)
-            self.assertEqual(data['monitor'][0]['bid'], 100.0) # sqlite stores numbers as real/int
             
             # Test Save Post Mortem
             save_post_mortem(deal_id, "Analysis Report")

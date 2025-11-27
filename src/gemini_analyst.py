@@ -4,6 +4,7 @@ import typing_extensions as typing
 from pydantic import BaseModel, Field
 from enum import Enum
 import json
+import pandas as pd
 from config import GEMINI_API_KEY
 
 # Configure the SDK
@@ -51,7 +52,7 @@ class GeminiAnalyst:
         self.model = genai.GenerativeModel(
             model_name=self.model_name,
             system_instruction="""
-            You are an expert financial trading analyst specializing in breakout strategies for market opens (London/NY/Nikkei).
+            You are an expert financial trading analyst specializing in breakout strategies for market opens (London/Nikkei).
             Your goal is to analyze provided OHLC market data, technical indicators, and news sentiment to generate high-quality trading triggers.
             
             STRICT RULES:
@@ -93,7 +94,7 @@ class GeminiAnalyst:
             print(f"Error during Gemini analysis: {e}")
             return None
 
-    def generate_post_mortem(self, trade_data: dict) -> str:
+    def generate_post_mortem(self, trade_data: dict, price_history_df: pd.DataFrame = None) -> str:
         """
         Generates a post-mortem analysis for a completed trade.
         """
@@ -107,6 +108,33 @@ class GeminiAnalyst:
         max_pnl = max((row['pnl'] for row in monitor), default=0)
         final_pnl = monitor[-1]['pnl'] if monitor else "N/A"
         
+        price_history_context = ""
+        if price_history_df is not None and not price_history_df.empty:
+            # Create a simplified string representation of the candle data
+            # Resample to 5-minute candles if too granular to save tokens
+            try:
+                # Ensure index is datetime
+                if not isinstance(price_history_df.index, pd.DatetimeIndex):
+                    price_history_df.index = pd.to_datetime(price_history_df.index)
+                
+                # Simple summary statistics
+                period_high = price_history_df['high'].max()
+                period_low = price_history_df['low'].min()
+                period_open = price_history_df['open'].iloc[0]
+                period_close = price_history_df['close'].iloc[-1]
+                
+                price_history_context = f"""
+        **Broader Market Context (1H before to Present):**
+        - Period High: {period_high}
+        - Period Low: {period_low}
+        - Open: {period_open}
+        - Close: {period_close}
+        - Candle Data (Last 20 5-min bars):
+        {price_history_df.resample('5Min').agg({'open':'first', 'high':'max', 'low':'min', 'close':'last'}).tail(20).to_string()}
+        """
+            except Exception as e:
+                price_history_context = f"Could not process price history: {e}"
+
         prompt = f"""
         You are a senior trading risk manager conducting a post-mortem analysis.
         
@@ -125,6 +153,8 @@ class GeminiAnalyst:
         - End Price (Bid): {end_price}
         - PnL Range: {min_pnl} to {max_pnl}
         - Final PnL: {final_pnl}
+        
+        {price_history_context}
         
         **Monitoring Data Sample (First 5, Last 5):**
         {monitor[:5]}
@@ -145,7 +175,7 @@ class GeminiAnalyst:
             # Create a temporary config for text
             text_config = genai.GenerationConfig(
                 temperature=0.2,
-                max_output_tokens=2000 # Increased token limit
+                max_output_tokens=8192 # Increased token limit to prevent truncation
             )
             
             # Permissive safety settings for financial analysis

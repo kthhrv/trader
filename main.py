@@ -3,11 +3,13 @@ import logging
 import signal
 import sys
 import argparse
+from datetime import datetime, timedelta
 from apscheduler.schedulers.blocking import BlockingScheduler
 from src.strategy_engine import StrategyEngine
 from src.news_fetcher import NewsFetcher
 from src.database import fetch_trade_data, save_post_mortem, fetch_recent_trades
 from src.gemini_analyst import GeminiAnalyst
+from src.ig_client import IGClient
 
 # Configure Logging
 logging.basicConfig(
@@ -60,11 +62,34 @@ def run_post_mortem(deal_id: str):
         logger.error(f"No data found for deal ID: {deal_id}")
         return
 
-    # 2. Analyze with Gemini
+    # 2. Fetch Historical Price Context
+    price_history_df = None
+    try:
+        log_entry = trade_data.get('log', {})
+        epic = log_entry.get('epic')
+        entry_time_str = log_entry.get('timestamp')
+        
+        if epic and entry_time_str:
+            entry_time = datetime.fromisoformat(entry_time_str)
+            start_time = (entry_time - timedelta(hours=1)).strftime('%Y-%m-%d %H:%M:%S')
+            end_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            
+            client = IGClient()
+            logger.info(f"Fetching historical data for {epic} from {start_time} to {end_time}...")
+            price_history_df = client.fetch_historical_data_by_range(
+                epic=epic,
+                resolution='1Min',
+                start_date=start_time,
+                end_date=end_time
+            )
+    except Exception as e:
+        logger.warning(f"Failed to fetch historical price context for post-mortem: {e}")
+
+    # 3. Analyze with Gemini
     analyst = GeminiAnalyst()
-    report = analyst.generate_post_mortem(trade_data)
+    report = analyst.generate_post_mortem(trade_data, price_history_df=price_history_df)
     
-    # 3. Save and Print
+    # 4. Save and Print
     save_post_mortem(deal_id, report)
     
     print("\n" + "="*40)

@@ -31,7 +31,7 @@ def init_db(db_path=None):
     conn = get_db_connection(db_path)
     cursor = conn.cursor()
     
-    # Table for Trade Logs (formerly trade_log.csv)
+    # Updated Table for Trade Logs (Consolidated)
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS trade_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -47,39 +47,22 @@ def init_db(db_path=None):
             confidence TEXT,
             spread_at_entry REAL,
             is_dry_run BOOLEAN,
-            deal_id TEXT
-        )
-    ''')
-    
-    # Table for Trade Monitoring (formerly logs/trades/trade_....csv)
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS trade_monitor (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
             deal_id TEXT,
-            timestamp TEXT,
-            bid REAL,
-            offer REAL,
+            exit_price REAL,
             pnl REAL,
-            status TEXT,
-            FOREIGN KEY(deal_id) REFERENCES trade_log(deal_id)
+            exit_time TEXT,
+            post_mortem TEXT
         )
     ''')
-
-    # Check and add post_mortem column if missing (migration)
-    cursor.execute("PRAGMA table_info(trade_log)")
-    columns = [column['name'] for column in cursor.fetchall()]
-    if 'post_mortem' not in columns:
-        cursor.execute("ALTER TABLE trade_log ADD COLUMN post_mortem TEXT")
-        logger.info("Added 'post_mortem' column to 'trade_log' table.")
     
     conn.commit()
     conn.close()
-    logger.info(f"Database initialized at {DB_PATH}")
+    logger.info(f"Database initialized at {db_path if db_path else DB_PATH}")
 
 def fetch_trade_data(deal_id: str, db_path=None):
     """
-    Fetches complete data for a trade (log + monitoring) by deal_id.
-    Returns a dictionary with 'log' and 'monitor' keys.
+    Fetches complete data for a trade from trade_log by deal_id.
+    Returns a dictionary with 'log' key containing the row data.
     """
     conn = get_db_connection(db_path)
     cursor = conn.cursor()
@@ -92,14 +75,28 @@ def fetch_trade_data(deal_id: str, db_path=None):
         if not trade_log:
             return None
             
-        # Fetch from trade_monitor
-        cursor.execute("SELECT * FROM trade_monitor WHERE deal_id = ? ORDER BY timestamp ASC", (deal_id,))
-        trade_monitor = cursor.fetchall()
-        
         return {
-            "log": dict(trade_log),
-            "monitor": [dict(row) for row in trade_monitor]
+            "log": dict(trade_log)
         }
+    finally:
+        conn.close()
+
+def update_trade_outcome(deal_id: str, exit_price: float, pnl: float, exit_time: str, outcome: str, db_path=None):
+    """
+    Updates an existing trade log with exit details.
+    """
+    conn = get_db_connection(db_path)
+    cursor = conn.cursor()
+    try:
+        cursor.execute('''
+            UPDATE trade_log 
+            SET exit_price = ?, pnl = ?, exit_time = ?, outcome = ?
+            WHERE deal_id = ?
+        ''', (exit_price, pnl, exit_time, outcome, deal_id))
+        conn.commit()
+        logger.info(f"Updated trade outcome for {deal_id}: PnL={pnl}, Outcome={outcome}")
+    except Exception as e:
+        logger.error(f"Failed to update trade outcome: {e}")
     finally:
         conn.close()
 

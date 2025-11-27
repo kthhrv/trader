@@ -374,17 +374,14 @@ class StrategyEngine:
                 logger.info("LIVE Market Order successfully placed.")
                 outcome = "LIVE_PLACED"
                 
-                # Start Monitoring
                 if confirmation and 'dealId' in confirmation:
                     deal_id = confirmation['dealId']
-                    logger.info(f"Starting to monitor trade {deal_id}...")
-                    self.trade_monitor.monitor_trade(deal_id, self.epic)
                 else:
-                    logger.warning("Could not extract dealId from confirmation. Monitoring skipped.")
-            
+                    logger.warning("Could not extract dealId from confirmation.")
+
             self.position_open = True # Set to True even in dry run to stop polling
 
-            # Log the placed trade
+            # Log the placed trade FIRST (Insert)
             self.trade_logger.log_trade(
                 epic=self.epic,
                 plan=plan,
@@ -393,6 +390,12 @@ class StrategyEngine:
                 is_dry_run=dry_run,
                 deal_id=deal_id
             )
+
+            # Start Monitoring (Update upon close) - Blocking call
+            if not dry_run and deal_id:
+                logger.info(f"Starting to monitor trade {deal_id}...")
+                self.trade_monitor.monitor_trade(deal_id, self.epic)
+            
             return True
             
         except Exception as e:

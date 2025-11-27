@@ -92,36 +92,70 @@ class IGClient:
 
         try:
             response = self.service.fetch_historical_prices_by_epic_and_num_points(
-                epic, "15Min", num_points # Corrected resolution format based on utils.py
+                epic, resolution, num_points
             )
             # The library returns a DataFrame directly in 'prices' key
             df = response['prices']
-            
-            # Handle MultiIndex columns (trading_ig usually returns (price_type, ohlc))
-            if isinstance(df.columns, pd.MultiIndex):
-                # Prefer 'bid' prices, fallback to 'last' or 'ask'
-                if 'bid' in df.columns.get_level_values(0):
-                    df = df['bid']
-                elif 'last' in df.columns.get_level_values(0):
-                    df = df['last']
-                elif 'ask' in df.columns.get_level_values(0):
-                    df = df['ask']
-                
-                # Flattening complete, now ensure lowercase names
-            
-            # Rename columns to standard lowercase for pandas_ta
-            df.rename(columns={
-                'Open': 'open',
-                'High': 'high', 
-                'Low': 'low', 
-                'Close': 'close',
-                'Volume': 'volume'
-            }, inplace=True)
-
-            return df
+            return self._process_historical_df(df)
         except Exception as e:
             logger.error(f"Error fetching data for {epic}: {e}")
             raise
+
+    @retry(
+        stop=stop_after_attempt(1),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception_type((IGException, ConnectionError))
+    )
+    def fetch_historical_data_by_range(self, epic: str, resolution: str, start_date: str, end_date: str) -> pd.DataFrame:
+        """
+        Fetches historical OHLC data for a given epic within a specific date range.
+        
+        Args:
+            epic (str): Instrument epic.
+            resolution (str): Resolution string (e.g., '1Min', '15Min').
+            start_date (str): Start datetime (YYYY-MM-DD HH:MM:SS).
+            end_date (str): End datetime (YYYY-MM-DD HH:MM:SS).
+            
+        Returns:
+            pd.DataFrame: A DataFrame with 'open', 'high', 'low', 'close', 'volume' columns.
+        """
+        if not self.authenticated:
+            self.authenticate()
+
+        try:
+            response = self.service.fetch_historical_prices_by_epic_and_date_range(
+                epic, resolution, start_date, end_date
+            )
+            df = response['prices']
+            return self._process_historical_df(df)
+        except Exception as e:
+            logger.error(f"Error fetching historical range for {epic}: {e}")
+            raise
+
+    def _process_historical_df(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Helper to process and standardize the historical prices DataFrame.
+        """
+        # Handle MultiIndex columns (trading_ig usually returns (price_type, ohlc))
+        if isinstance(df.columns, pd.MultiIndex):
+            # Prefer 'bid' prices, fallback to 'last' or 'ask'
+            if 'bid' in df.columns.get_level_values(0):
+                df = df['bid']
+            elif 'last' in df.columns.get_level_values(0):
+                df = df['last']
+            elif 'ask' in df.columns.get_level_values(0):
+                df = df['ask']
+        
+        # Rename columns to standard lowercase for pandas_ta
+        df.rename(columns={
+            'Open': 'open',
+            'High': 'high', 
+            'Low': 'low', 
+            'Close': 'close',
+            'Volume': 'volume'
+        }, inplace=True)
+        
+        return df
 
     def place_spread_bet_order(self, epic: str, direction: str, size: float, stop_level: float, level: float = None, limit_level: float = None):
         """

@@ -167,20 +167,18 @@ def test_e2e_trading_flow(e2e_mocks, caplog):
     trade_data = fetch_trade_data("MOCK_DEAL_ID", db_path=db_path)
     assert trade_data is not None
     assert trade_data['log']['deal_id'] == "MOCK_DEAL_ID"
-    assert trade_data['log']['outcome'] == "LIVE_PLACED" # Outcome at placement
-    
+    assert trade_data['log']['outcome'] == "CLOSED" # Outcome updated after monitoring    
     # The monitor will log multiple times, but the final status should reflect closure
     # We need to query the monitor table directly to get the latest status and PnL.
     conn = get_db_connection(db_path)
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM trade_monitor WHERE deal_id = ? ORDER BY timestamp DESC LIMIT 1", ("MOCK_DEAL_ID",))
+    cursor.execute("SELECT outcome, pnl FROM trade_log WHERE deal_id = ?", ("MOCK_DEAL_ID",))
     latest_monitor_entry = cursor.fetchone()
     conn.close()
     
     assert latest_monitor_entry is not None
-    assert latest_monitor_entry['status'] == "CLOSED"
-    assert latest_monitor_entry['pnl'] == 50.0 # From mock_ig_client.simulate_position_close
-
+    assert latest_monitor_entry[0] == "CLOSED"
+    assert latest_monitor_entry[1] == 50.0 # From mock_ig_client.simulate_position_close
     assert "Trade MOCK_DEAL_ID CLOSED. Monitoring finished." in caplog.text
     
     logger.info("E2E test completed successfully.")
