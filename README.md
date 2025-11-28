@@ -21,7 +21,7 @@ A fully automated trading bot that leverages Google's **Gemini 3 Pro Preview** (
 *   **Broker API:** IG Markets (via `trading-ig`)
 *   **Database:** SQLite (`data/trader.db`)
 *   **Data Processing:** `pandas`, `pandas-ta`
-*   **News Fetching:** `feedparser` (RSS)
+*   **News Fetching:** `feedparser`
 *   **Scheduling:** `APScheduler`
 
 ## 📦 Installation
@@ -103,6 +103,10 @@ pytest
 *   **Mandatory Stops:** The engine refuses to place orders without a defined Stop Loss.
 *   **Dynamic Trailing Stops:** Profit-taking stops can be dynamically moved to **Breakeven (at 1.5R)** and then **trailed based on 2.0x ATR** to protect and maximize gains, as chosen by Gemini.
 *   **Chain-of-Thought:** The AI must justify its trade with a step-by-step rationale before generating a signal.
+*   **Deterministic Plan Validation:** Implements hardcoded sanity checks to reject AI-generated plans that fail to meet safety criteria:
+    *   **Risk/Reward:** Must be ≥ 1.0 (if Take Profit is set).
+    *   **Stop Distance:** Must be between 0.5x ATR (to avoid noise) and 5.0x ATR (to prevent excessive risk).
+    *   **Logic Check:** Ensures Entry price is logically consistent with Stop Loss and Direction.
 
 ## 📂 Project Structure
 

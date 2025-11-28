@@ -127,6 +127,13 @@ class StrategyEngine:
                 if signal.atr is None: # If Gemini doesn't provide it, use our calculated one
                     signal.atr = latest['ATR']
                 
+                # --- Hardcoded Safety Checks ---
+                if signal.action != Action.WAIT:
+                    if not self._validate_plan(signal):
+                        logger.warning("PLAN RESULT: Gemini plan failed safety validation. Treating as WAIT.")
+                        self.active_plan = None
+                        return
+
                 if signal.action != Action.WAIT:
                     self.active_plan = signal
                     logger.info(f"PLAN GENERATED: {signal.action} {signal.size} at {signal.entry} (Stop: {signal.stop_loss}, TP: {signal.take_profit}) Conf: {signal.confidence} Type: {signal.entry_type.value}")
@@ -140,6 +147,53 @@ class StrategyEngine:
                 
         except Exception as e:
             logger.error(f"Error generating plan: {e}")
+
+    def _validate_plan(self, plan: TradingSignal) -> bool:
+        """
+        Performs hardcoded sanity checks on the generated plan.
+        Returns True if valid, False if rejected.
+        """
+        try:
+            # 1. Entry vs Stop Logic
+            if plan.action == Action.BUY:
+                if plan.entry <= plan.stop_loss:
+                    logger.warning(f"Validation Failed: BUY Entry ({plan.entry}) must be > Stop Loss ({plan.stop_loss}).")
+                    return False
+            elif plan.action == Action.SELL:
+                if plan.entry >= plan.stop_loss:
+                    logger.warning(f"Validation Failed: SELL Entry ({plan.entry}) must be < Stop Loss ({plan.stop_loss}).")
+                    return False
+
+            risk_dist = abs(plan.entry - plan.stop_loss)
+
+            # 2. Risk/Reward Ratio (only if TP is set)
+            if plan.take_profit:
+                reward_dist = abs(plan.take_profit - plan.entry)
+                if risk_dist > 0:
+                    rr_ratio = reward_dist / risk_dist
+                    if rr_ratio < 1.0:
+                        logger.warning(f"Validation Failed: Risk/Reward Ratio {rr_ratio:.2f} is < 1.0 (Risk: {risk_dist:.2f}, Reward: {reward_dist:.2f}).")
+                        return False
+            
+            # 3. Stop Tightness vs ATR
+            if plan.atr and plan.atr > 0:
+                # Min Stop Distance (0.5 * ATR)
+                min_stop = 0.5 * plan.atr
+                if risk_dist < min_stop:
+                    logger.warning(f"Validation Failed: Stop Distance {risk_dist:.2f} is too tight (< 0.5 * ATR: {min_stop:.2f}).")
+                    return False
+                
+                # Max Stop Distance (5.0 * ATR) - Prevent "wide" stops
+                max_stop = 5.0 * plan.atr
+                if risk_dist > max_stop:
+                    logger.warning(f"Validation Failed: Stop Distance {risk_dist:.2f} is too wide (> 5.0 * ATR: {max_stop:.2f}).")
+                    return False
+            
+            logger.info("Validation Successful: Gemini plan accepted.")
+            return True
+        except Exception as e:
+            logger.error(f"Error during plan validation: {e}")
+            return False
 
     def _get_news_query(self, epic: str) -> str:
         """
