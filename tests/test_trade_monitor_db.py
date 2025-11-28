@@ -1,44 +1,65 @@
 import unittest
 from unittest.mock import patch, MagicMock
+import threading
+import time
+import json
 from src.trade_monitor_db import TradeMonitorDB
 
 class TestTradeMonitorDB(unittest.TestCase):
     
     def setUp(self):
         self.mock_client = MagicMock()
-        self.monitor = TradeMonitorDB(self.mock_client)
+        self.mock_stream_manager = MagicMock() # Add mock stream_manager
+        self.monitor = TradeMonitorDB(self.mock_client, self.mock_stream_manager)
 
     @patch('src.trade_monitor_db.update_trade_outcome')
-    @patch('time.sleep', return_value=None)
-    def test_monitor_trade_flow(self, mock_sleep, mock_update_db):
-        # Setup IG Client mock behavior
-        # 1. Open Position (loop continues)
-        # 2. Closed (None) -> loop breaks, update db
-        self.mock_client.fetch_open_position_by_deal_id.side_effect = [
-            {'profitAndLoss': 10, 'bid': 100, 'offer': 101},
-            None
-        ]
-        self.mock_client.get_market_info.return_value = {'snapshot': {'bid': 102, 'offer': 103}}
+    def test_monitor_trade_flow(self, mock_update_db):
+        deal_id = "DEAL123"
         
-        # Mock transaction history return
+        # Setup IG Client mock for PnL fetch
         mock_history_df = MagicMock()
         mock_history_df.empty = False
         mock_history_df.columns = ['profitAndLoss', 'closeLevel']
         mock_history_df.iloc.__getitem__.return_value = {'profitAndLoss': '£50.5', 'closeLevel': 105.0}
         self.mock_client.fetch_transaction_history_by_deal_id.return_value = mock_history_df
         
-        self.monitor.monitor_trade("DEAL123", "EPIC", polling_interval=0.1)
+        # We need to run monitor_trade in a thread because it blocks waiting for event
+        monitor_thread = threading.Thread(target=self.monitor.monitor_trade, args=(deal_id, "EPIC"), kwargs={'polling_interval': 0.1})
+        monitor_thread.start()
         
-        # Should be called ONCE: only when status is CLOSED
+        time.sleep(0.1) # Give it time to start and register callback
+        
+        # Verify it subscribed
+        self.mock_stream_manager.subscribe_trade_updates.assert_called_once()
+        
+        # Trigger the closure via callback
+        close_payload = json.dumps({
+            "dealId": deal_id,
+            "status": "CLOSED",
+            "level": 105.0,
+            "profitAndLoss": 50.5
+        })
+        self.monitor._handle_trade_update({
+            'type': 'trade_update',
+            'payload': close_payload
+        })
+        
+        # Join thread (should finish now that event is set)
+        monitor_thread.join(timeout=2.0)
+        self.assertFalse(monitor_thread.is_alive(), "Monitor thread failed to exit")
+        
+        # Check DB update
         mock_update_db.assert_called_once()
-        
-        # Check args
         args = mock_update_db.call_args[0]
         # deal_id, exit_price, pnl, exit_time, outcome, db_path
-        self.assertEqual(args[0], "DEAL123")
-        self.assertEqual(args[1], 105.0) # exit_price from history
-        self.assertEqual(args[2], 50.5)  # pnl from history
-        # outcome is passed as a keyword argument
+        self.assertEqual(args[0], deal_id)
+        self.assertEqual(args[1], 105.0) 
+        self.assertEqual(args[2], 50.5)
+        # outcome is passed as a keyword argument in the actual code call, 
+        # but let's check how it's captured. 
+        # The code is: update_trade_outcome(..., outcome=status, ...)
+        # args might only contain positional args if outcome was passed as kwarg
+        # Let's check call_args kwargs
         kwargs = mock_update_db.call_args[1]
         self.assertEqual(kwargs['outcome'], "CLOSED")
 

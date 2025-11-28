@@ -15,7 +15,8 @@ class StreamManager:
         self.ig_client = ig_client
         self.process: Optional[subprocess.Popen] = None
         self.reader_thread: Optional[threading.Thread] = None
-        self.callbacks: Dict[str, Callable[[dict], None]] = {}
+        self.callbacks: Dict[str, Callable[[dict], None]] = {} # For epic-specific callbacks
+        self._trade_callback: Optional[Callable[[dict], None]] = None # For trade updates
         self.is_connected = threading.Event() # Event to signal connection status
         
         self.ls_endpoint = "https://demo-apd.marketdatasystems.com" 
@@ -28,11 +29,21 @@ class StreamManager:
             if line_str.startswith("{") and line_str.endswith("}"):
                 try:
                     data = json.loads(line_str)
-                    epic = data.get('epic')
-                    if epic and epic in self.callbacks:
-                        self.callbacks[epic](data) # Call registered callback
+                    message_type = data.get('type')
+                    
+                    if message_type == "price_update":
+                        epic = data.get('epic')
+                        if epic and epic in self.callbacks:
+                            self.callbacks[epic](data) # Call registered epic-specific callback
+                        else:
+                            logger.debug(f"Received unhandled price update: {data}")
+                    elif message_type == "trade_update":
+                        if self._trade_callback:
+                            self._trade_callback(data) # Call registered trade update callback
+                        else:
+                            logger.debug(f"Received unhandled trade update: {data}")
                     else:
-                        logger.debug(f"Received unhandled stream data: {data}")
+                        logger.debug(f"Received unknown stream data type: {data}")
                 except json.JSONDecodeError:
                     logger.warning(f"Failed to decode JSON from Node.js stream: {line_str}")
             elif "[NODE_STREAM_INFO]" in line_str:
@@ -146,6 +157,12 @@ class StreamManager:
         else:
             logger.info(f"Node.js stream service for {epic} connected successfully.")
 
+    def subscribe_trade_updates(self, callback: Callable[[dict], None]):
+        """
+        Registers a callback function to receive trade-related stream updates.
+        """
+        self._trade_callback = callback
+        logger.info("Registered callback for trade updates.")
 
     def stop(self):
         """

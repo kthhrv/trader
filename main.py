@@ -13,7 +13,7 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 from src.strategy_engine import StrategyEngine
 from src.news_fetcher import NewsFetcher
 from src.database import fetch_trade_data, save_post_mortem, fetch_recent_trades
-from src.gemini_analyst import GeminiAnalyst
+from src.gemini_analyst import GeminiAnalyst, TradingSignal, Action, EntryType # Added imports
 from src.ig_client import IGClient
 
 # Configure Logging
@@ -54,6 +54,68 @@ MARKET_CONFIGS = {
         "max_spread": 8.0
     }
 }
+
+def run_test_trade(epic: str, dry_run: bool = False, trade_action: str = "BUY"):
+    """
+    Executes an immediate TEST trade with minimal size and tight stops.
+    Bypasses Gemini analysis.
+    """
+    logger.info(f"--- STARTING TEST TRADE for {epic}, Action: {trade_action} (Dry Run: {dry_run}) ---")
+    
+    try:
+        client = IGClient()
+        market_info = client.get_market_info(epic)
+        if not market_info or 'snapshot' not in market_info:
+            logger.error("Could not fetch market info for test trade.")
+            return
+
+        current_offer = float(market_info['snapshot']['offer'])
+        current_bid = float(market_info['snapshot']['bid'])
+        
+        # Determine entry, stop, and profit based on action
+        action_enum = Action[trade_action] # Convert string to enum
+        entry_price = 0.0
+        stop_loss = 0.0
+        take_profit = 0.0
+
+        if action_enum == Action.BUY:
+            entry_price = current_offer # Buy at the offer price
+            stop_loss = entry_price - 10.0 # 10 points below entry
+            take_profit = entry_price + 20.0 # 20 points above entry
+            logger.info(f"Test BUY: Entry at {entry_price}, SL {stop_loss}, TP {take_profit}")
+        elif action_enum == Action.SELL:
+            entry_price = current_bid # Sell at the bid price
+            stop_loss = entry_price + 10.0 # 10 points above entry
+            take_profit = entry_price - 20.0 # 20 points below entry
+            logger.info(f"Test SELL: Entry at {entry_price}, SL {stop_loss}, TP {take_profit}")
+        else:
+            logger.error(f"Invalid trade action for test trade: {trade_action}")
+            return
+        
+        test_plan = TradingSignal(
+            ticker=epic,
+            action=action_enum,
+            entry=entry_price,
+            stop_loss=stop_loss,
+            take_profit=take_profit,
+            confidence="high",
+            reasoning="Manual Test Trade via CLI",
+            size=0.5, # Minimum size
+            atr=5.0, # Dummy ATR
+            entry_type=EntryType.INSTANT,
+            use_trailing_stop=True
+        )
+        
+        engine = StrategyEngine(epic, strategy_name="TEST_TRADE", dry_run=dry_run, verbose=True, max_spread=5.0) # High max spread to ensure execution
+        engine.active_plan = test_plan
+        
+        logger.info(f"Injecting Test Plan: {trade_action} at {entry_price}, SL {stop_loss}, TP {take_profit}")
+        
+        # Execute (timeout after 60s)
+        engine.execute_strategy(timeout_seconds=60)
+        
+    except Exception as e:
+        logger.error(f"Test trade failed: {e}")
 
 def run_volatility_check(epic: str):
     """
@@ -250,6 +312,8 @@ def main():
     parser.add_argument("--post-mortem", type=str, help="Run post-mortem analysis on a specific deal ID.")
     parser.add_argument("--recent-trades", type=int, nargs="?", const=5, help="Print N recent trades. Defaults to 5 if no number provided.")
     parser.add_argument("--volatility-check", action="store_true", help="Check current market volatility (Range/ATR) for the selected market/epic.")
+    parser.add_argument("--test-trade", action="store_true", help="Execute an immediate test trade (BUY/SELL) with minimal size/stops. Requires --epic or --market.")
+    parser.add_argument("--test-trade-action", type=str, choices=["BUY", "SELL"], default="BUY", help="Action for --test-trade: 'BUY' or 'SELL'. Defaults to BUY.")
     parser.add_argument("--verbose", "-v", action="store_true", help="Print live prices to console")
     
     market_group = parser.add_mutually_exclusive_group()
@@ -262,6 +326,19 @@ def main():
     # Register signal handlers
     signal.signal(signal.SIGINT, graceful_shutdown)
     signal.signal(signal.SIGTERM, graceful_shutdown)
+
+    if args.test_trade:
+        epic_to_trade = None
+        if args.market:
+            epic_to_trade = MARKET_CONFIGS[args.market]["epic"]
+        elif args.epic:
+            epic_to_trade = args.epic
+        
+        if epic_to_trade:
+            run_test_trade(epic_to_trade, dry_run=args.dry_run, trade_action=args.test_trade_action)
+        else:
+            logger.error("When --test-trade is used, either --epic or --market must be specified.")
+        return
 
     if args.volatility_check:
         if args.market:

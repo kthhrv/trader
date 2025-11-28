@@ -47,10 +47,10 @@ client.addListener({
 
 client.connect();
 
-// --- Subscription Setup ---
-const sub = new ls.Subscription("MERGE", [`L1:${epic}`], ["BID", "OFFER", "UPDATE_TIME", "MARKET_STATE"]);
+// --- Subscription 1: Market Data (MERGE) ---
+const priceSub = new ls.Subscription("MERGE", [`L1:${epic}`], ["BID", "OFFER", "UPDATE_TIME", "MARKET_STATE"]);
 
-sub.addListener({
+priceSub.addListener({
   onItemUpdate: function(update) {
     const bid = update.getValue("BID");
     const offer = update.getValue("OFFER");
@@ -69,17 +69,53 @@ sub.addListener({
     }
   },
   onSubscription: function() {
-    log_info(`Subscribed to ${epic}`);
-  },
-  onUnsubscription: function() {
-    log_info(`Unsubscribed from ${epic}`);
+    log_info(`Subscribed to Price: ${epic}`);
   },
   onSubscriptionError: function(code, msg) {
-    log_error(`[Subscription Error]: ${code} - ${msg}`);
+    log_error(`[Price Subscription Error]: ${code} - ${msg}`);
   }
 });
 
-client.subscribe(sub);
+client.subscribe(priceSub);
 
-// Keep process alive indefinitely until explicitly killed or disconnected
-// Python parent process will manage lifecycle
+// --- Subscription 2: Trade Updates (DISTINCT) ---
+// Subscribing to TRADE:{account_id} to receive CONFIRMS and OPU (Open Position Updates)
+const tradeSub = new ls.Subscription("DISTINCT", [`TRADE:${account_id}`], ["CONFIRMS", "OPU"]);
+tradeSub.setRequestedSnapshot("yes");
+
+tradeSub.addListener({
+  onItemUpdate: function(update) {
+    const confirms = update.getValue("CONFIRMS");
+    const opu = update.getValue("OPU");
+    
+    // We log anything significant.
+    // 'CONFIRMS' usually contains JSON string about recent trade success/fail.
+    // 'OPU' contains JSON string about position status changes.
+    
+    if (confirms) {
+        log_data({
+            type: "trade_update",
+            subtype: "confirms",
+            payload: confirms
+        });
+    }
+    if (opu) {
+         log_data({
+            type: "trade_update",
+            subtype: "opu",
+            payload: opu
+        });
+    }
+  },
+  onSubscription: function() {
+     log_info(`Subscribed to Trades: TRADE:${account_id}`);
+  },
+  onSubscriptionError: function(code, msg) {
+    log_error(`[Trade Subscription Error]: ${code} - ${msg}`);
+  }
+});
+
+client.subscribe(tradeSub);
+
+// Keep process alive indefinitely
+

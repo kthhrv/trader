@@ -18,7 +18,8 @@ def temp_db():
 
 def test_trade_monitor_uses_custom_db_path(temp_db):
     mock_client = MagicMock()
-    monitor = TradeMonitorDB(client=mock_client, db_path=temp_db)
+    mock_stream_manager = MagicMock() # Add mock stream_manager
+    monitor = TradeMonitorDB(client=mock_client, stream_manager=mock_stream_manager, db_path=temp_db)
     
     # Verify attribute is set
     assert monitor.db_path == temp_db

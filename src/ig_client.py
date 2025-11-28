@@ -22,6 +22,16 @@ class IGClient:
             "LIVE" if IS_LIVE else "DEMO",
             acc_number=IG_ACC_ID
         )
+        
+        # Enforce default timeout on the session to prevent hangs
+        # This monkey-patches the session object used by trading_ig
+        original_request = self.service.session.request
+        def timeout_request(*args, **kwargs):
+            if 'timeout' not in kwargs:
+                kwargs['timeout'] = 10 # Default 10s timeout
+            return original_request(*args, **kwargs)
+        self.service.session.request = timeout_request
+        
         self.authenticated = False
         
     def authenticate(self):

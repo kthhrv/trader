@@ -40,8 +40,8 @@ class StrategyEngine:
         self.news_fetcher = news_fetcher if news_fetcher else NewsFetcher()
         self.market_status = market_status if market_status else MarketStatus()
         self.trade_logger = trade_logger if trade_logger else TradeLoggerDB()
-        self.trade_monitor = trade_monitor if trade_monitor else TradeMonitorDB(self.client)
-        self.stream_manager = stream_manager if stream_manager else StreamManager(self.client)
+        self.stream_manager = stream_manager if stream_manager else StreamManager(self.client) # Initialize first
+        self.trade_monitor = trade_monitor if trade_monitor else TradeMonitorDB(self.client, self.stream_manager)
         
         self.vix_epic = "CC.D.VIX.USS.IP"
         

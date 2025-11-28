@@ -35,7 +35,7 @@ def advanced_mocks(temp_db_path):
     mock_trade_logger.log_trade = MagicMock(side_effect=mock_trade_logger.log_trade)
     
     # Fast polling for test speed
-    mock_trade_monitor = TradeMonitorDB(client=mock_ig_client, db_path=temp_db_path, polling_interval=0.1)
+    mock_trade_monitor = TradeMonitorDB(client=mock_ig_client, stream_manager=mock_stream_manager, db_path=temp_db_path, polling_interval=0.1)
     mock_trade_monitor.monitor_trade = MagicMock(side_effect=mock_trade_monitor.monitor_trade)
     
     yield mock_ig_client, mock_gemini_analyst, mock_stream_manager, mock_market_status, mock_news_fetcher, mock_trade_logger, mock_trade_monitor, temp_db_path
@@ -122,8 +122,15 @@ def test_e2e_confirmation_entry(advanced_mocks, caplog):
         # Verify Trade Placed
         mock_ig_client.place_spread_bet_order.assert_called_once()
         
-        # Cleanup thread
-        engine.position_open = True # Force exit loop if not already done
+        # Cleanup
+        # Simulate closure to exit monitor
+        mock_stream_manager.simulate_trade_update({
+            "dealId": "MOCK_DEAL_ID",
+            "status": "CLOSED",
+            "level": 7505.0,
+            "profitAndLoss": 50.0
+        })
+        
         trade_execution_thread.join(timeout=1.0)
 
 def test_e2e_trailing_stop(advanced_mocks, caplog):
@@ -166,7 +173,7 @@ def test_e2e_trailing_stop(advanced_mocks, caplog):
     mock_trade_monitor.monitor_trade.assert_called_once()
     
     # 3. Simulate Price Movement for Trailing
-    # Monitor is running in background. We need to control what `fetch_open_position` returns.
+    # Monitor is running in background (polling for trailing stop).
     
     # Initial State
     initial_pos = {'dealId': 'MOCK_DEAL_ID', 'direction': 'BUY', 'bid': 7500, 'offer': 7501, 'stopLevel': 7450}
@@ -179,23 +186,32 @@ def test_e2e_trailing_stop(advanced_mocks, caplog):
     # NEW LOGIC: Breakeven triggers (7500). Trailing triggers (2.0 ATR = 20 pts -> 7555).
     move_2_pos = {'dealId': 'MOCK_DEAL_ID', 'direction': 'BUY', 'bid': 7575, 'offer': 7576, 'stopLevel': 7450} 
     
-    # Close
-    close_pos = None
-    
-    # We set the side_effect of fetch_open_position to iterate through these states
-    # The monitor polls every 0.1s. We need to provide enough "same state" returns to ensure logic catches it, 
-    # or just sequence them.
+    # The monitor polls. We sequence the returns.
+    # Note: We do NOT return None for closure here anymore, as closure is event driven.
+    # We keep returning the last state to keep the loop running until we trigger closure event.
     mock_ig_client.fetch_open_position_by_deal_id.side_effect = [
         initial_pos, initial_pos, 
-        move_1_pos, move_1_pos, # Should NOT trigger
-        move_2_pos, move_2_pos, # Should trigger Breakeven AND Trailing
-        close_pos
+        move_1_pos, move_1_pos, 
+        move_2_pos, move_2_pos,
+        move_2_pos, move_2_pos, # Keep returning active
+        move_2_pos
     ]
+    
+    # Give time for trailing logic to run
+    time.sleep(1.0)
+    
+    # 4. Trigger Closure via Stream
+    mock_stream_manager.simulate_trade_update({
+        "dealId": "MOCK_DEAL_ID",
+        "status": "CLOSED",
+        "level": 7555.0,
+        "profitAndLoss": 55.0
+    })
     
     # Wait for monitor to finish
     trade_execution_thread.join(timeout=2.0)
     
-    # 4. Verify Updates
+    # 5. Verify Updates
     # Check calls to update_open_position
     assert mock_ig_client.update_open_position.call_count >= 2
     
@@ -241,18 +257,29 @@ def test_e2e_no_trailing_stop(advanced_mocks, caplog):
     time.sleep(0.2)
     
     # 3. Simulate Price Movement that WOULD normally trigger trailing
+    # But because trailing is disabled, nothing should happen.
+    
     initial_pos = {'dealId': 'MOCK_DEAL_ID_2', 'direction': 'BUY', 'bid': 7500, 'offer': 7501, 'stopLevel': 7450}
-    
-    # Move: Profit = 1.5R. Normally triggers trailing.
     move_pos = {'dealId': 'MOCK_DEAL_ID_2', 'direction': 'BUY', 'bid': 7575, 'offer': 7576, 'stopLevel': 7450} 
-    
-    close_pos = None
     
     mock_ig_client.fetch_open_position_by_deal_id.side_effect = [
         initial_pos, initial_pos, 
-        move_pos, move_pos, move_pos,
-        close_pos
+        move_pos, move_pos, move_pos
     ]
+    
+    # Mock order placement return to match deal ID (needed for monitor)
+    mock_ig_client.place_spread_bet_order.return_value = {'dealId': 'MOCK_DEAL_ID_2', 'dealStatus': 'ACCEPTED'}
+    
+    # Give time for monitor to poll
+    time.sleep(1.0)
+    
+    # Trigger Closure via Stream
+    mock_stream_manager.simulate_trade_update({
+        "dealId": "MOCK_DEAL_ID_2",
+        "status": "CLOSED",
+        "level": 7575.0,
+        "profitAndLoss": 75.0
+    })
     
     # Wait for monitor to finish
     trade_execution_thread.join(timeout=2.0)

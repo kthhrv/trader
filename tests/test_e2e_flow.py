@@ -40,7 +40,7 @@ def e2e_mocks(temp_db_path):
     # Wrap log_trade with a mock to allow assertions while keeping functionality
     mock_trade_logger.log_trade = MagicMock(side_effect=mock_trade_logger.log_trade)
     
-    mock_trade_monitor = TradeMonitorDB(client=mock_ig_client, db_path=temp_db_path, polling_interval=0.1)
+    mock_trade_monitor = TradeMonitorDB(client=mock_ig_client, stream_manager=mock_stream_manager, db_path=temp_db_path, polling_interval=0.1)
     # Wrap monitor_trade with a mock to allow assertions while keeping functionality
     mock_trade_monitor.monitor_trade = MagicMock(side_effect=mock_trade_monitor.monitor_trade)
     
@@ -150,9 +150,34 @@ def test_e2e_trading_flow(e2e_mocks, caplog):
         atr=10.0,
         use_trailing_stop=True
     )
-    # 6. Simulate Trade Closure (e.g., hitting stop loss/take profit or manual close)
-    # The TradeMonitorDB will poll, so we simulate its client calls
-    mock_ig_client.simulate_position_close(pnl=50.0)
+    
+    # 6. Simulate Trade Closure via Stream Update
+    # Mock IG Client fetch_transaction_history_by_deal_id for PnL
+    mock_history_df = pd.DataFrame([{
+        'dealReference': 'REF',
+        'profitAndLoss': '£50.00',
+        'closeLevel': 7600.0
+    }])
+    mock_ig_client.fetch_transaction_history_by_deal_id.return_value = mock_history_df
+
+    # Manually trigger the closure callback on monitor
+    # We need to construct the payload as the monitor expects
+    import json
+    close_payload = json.dumps({
+        "dealId": "MOCK_DEAL_ID",
+        "status": "CLOSED",
+        "level": 7600.0,
+        "profitAndLoss": 50.0
+    })
+    
+    # Wait briefly for monitor to be running and subscribed
+    time.sleep(0.2)
+    
+    # Trigger callback
+    mock_trade_monitor._handle_trade_update({
+        'type': 'trade_update',
+        'payload': close_payload
+    })
 
     # Allow monitor to poll and detect closure
     trade_execution_thread.join(timeout=3.0) # Wait for the thread to finish
@@ -164,8 +189,6 @@ def test_e2e_trading_flow(e2e_mocks, caplog):
     assert logged_trade_entry['epic'] == epic
     assert logged_trade_entry['outcome'] == "LIVE_PLACED"
     assert logged_trade_entry['deal_id'] == "MOCK_DEAL_ID"
-    
-    # Verify stream manager was stopped
     
     # Verify stream manager was stopped
     mock_stream_manager.stop.assert_called_once()
@@ -185,7 +208,7 @@ def test_e2e_trading_flow(e2e_mocks, caplog):
     
     assert latest_monitor_entry is not None
     assert latest_monitor_entry[0] == "CLOSED"
-    assert latest_monitor_entry[1] == 50.0 # From mock_ig_client.simulate_position_close
+    assert latest_monitor_entry[1] == 50.0 
     assert "Trade MOCK_DEAL_ID CLOSED. Monitoring finished." in caplog.text
     
     logger.info("E2E test completed successfully.")

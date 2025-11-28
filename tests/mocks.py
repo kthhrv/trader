@@ -95,6 +95,7 @@ class MockGeminiAnalyst:
 class MockStreamManager:
     def __init__(self):
         self.callbacks = {}
+        self._trade_callback = None
         self.connect_and_subscribe = MagicMock(side_effect=self._connect_and_subscribe_impl)
         self.stop = MagicMock()
         
@@ -107,6 +108,18 @@ class MockStreamManager:
                 "offer": offer,
                 "time": datetime.now().isoformat(),
                 "market_state": "OPEN"
+            })
+
+    def subscribe_trade_updates(self, callback):
+        self._trade_callback = callback
+
+    def simulate_trade_update(self, payload: dict):
+        if self._trade_callback:
+            # Payload is expected to be a JSON string inside the stream message
+            import json
+            self._trade_callback({
+                "type": "trade_update",
+                "payload": json.dumps(payload)
             })
 
     def _connect_and_subscribe_impl(self, epic: str, callback):
