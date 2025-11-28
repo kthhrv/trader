@@ -252,7 +252,19 @@ class StrategyEngine:
                 # Log status every 10 seconds to show it's alive
                 current_time = time.time()
                 if current_time - last_log_time > 10:
-                    logger.info(f"MONITORING ({self.epic}): Target Entry={plan.entry}, Current Offer={self.current_offer}, Current Bid={self.current_bid} (Loop Status)")
+                    wait_msg = ""
+                    if plan.entry_type == EntryType.INSTANT:
+                        if plan.action == Action.BUY:
+                            wait_msg = f"Waiting for BUY trigger (INSTANT): Offer {self.current_offer} >= {plan.entry}"
+                        elif plan.action == Action.SELL:
+                            wait_msg = f"Waiting for SELL trigger (INSTANT): Bid {self.current_bid} <= {plan.entry}"
+                    elif plan.entry_type == EntryType.CONFIRMATION:
+                        if plan.action == Action.BUY:
+                            wait_msg = f"Waiting for BUY trigger (CONFIRMATION): Candle Close > {plan.entry}"
+                        elif plan.action == Action.SELL:
+                            wait_msg = f"Waiting for SELL trigger (CONFIRMATION): Candle Close < {plan.entry}"
+                    
+                    logger.info(f"MONITORING ({self.epic}): {wait_msg} | Current Bid/Offer: {self.current_bid}/{self.current_offer}")
                     last_log_time = current_time
                 
                 # --- Spread and Trigger Logic ---
@@ -306,6 +318,8 @@ class StrategyEngine:
                                     elif plan.action == Action.SELL and close_price < plan.entry:
                                         triggered = True
                                         logger.info(f"SELL TRIGGERED (CONFIRMATION): 1m Close {close_price} < Entry {plan.entry}")
+                                    else:
+                                        logger.info(f"Checked CONFIRMATION ({current_dt.strftime('%H:%M')}): Close {close_price} did not trigger {plan.action} (Target: {plan.entry})")
                                         
                                     last_checked_minute = current_dt.minute
                         except Exception as e:
