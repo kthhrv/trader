@@ -38,8 +38,11 @@ class MockIGClient:
         self.get_market_info = MagicMock(return_value={
             'snapshot': {'bid': 7499.0, 'offer': 7500.0} # Default spread of 1.0
         })
+        
+        # Mock for update_open_position
+        self.update_open_position = MagicMock(return_value={'dealReference': 'MOCK_UPDATE_REF'})
 
-    def _create_mock_historical_data(self, num_points=25):
+    def _create_mock_historical_data(self, num_points=50):
         data = {
             'open': [100.0 + i for i in range(num_points)],
             'high': [105.0 + i for i in range(num_points)],

@@ -46,6 +46,7 @@ def init_db(db_path=None):
             reasoning TEXT,
             confidence TEXT,
             spread_at_entry REAL,
+            atr REAL,
             is_dry_run BOOLEAN,
             deal_id TEXT,
             exit_price REAL,

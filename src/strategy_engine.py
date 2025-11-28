@@ -1,11 +1,12 @@
 import logging
 import time
 from typing import Optional
+from datetime import datetime
 import pandas as pd
 import pandas_ta as ta
 from config import IS_LIVE, RISK_PER_TRADE_PERCENT
 from src.ig_client import IGClient
-from src.gemini_analyst import GeminiAnalyst, TradingSignal, Action
+from src.gemini_analyst import GeminiAnalyst, TradingSignal, Action, EntryType
 from src.news_fetcher import NewsFetcher
 from src.trade_logger_db import TradeLoggerDB
 from src.trade_monitor_db import TradeMonitorDB
@@ -128,7 +129,7 @@ class StrategyEngine:
                 
                 if signal.action != Action.WAIT:
                     self.active_plan = signal
-                    logger.info(f"PLAN GENERATED: {signal.action} {signal.size} at {signal.entry} (Stop: {signal.stop_loss}, TP: {signal.take_profit}) Conf: {signal.confidence}")
+                    logger.info(f"PLAN GENERATED: {signal.action} {signal.size} at {signal.entry} (Stop: {signal.stop_loss}, TP: {signal.take_profit}) Conf: {signal.confidence} Type: {signal.entry_type.value}")
                 else:
                     logger.info("PLAN RESULT: Gemini advised WAIT.")
                     self.active_plan = None
@@ -173,6 +174,7 @@ class StrategyEngine:
         
         start_time = time.time()
         last_log_time = start_time
+        last_checked_minute = -1
         plan = self.active_plan
         
         try:
@@ -199,9 +201,6 @@ class StrategyEngine:
                     logger.info(f"MONITORING ({self.epic}): Target Entry={plan.entry}, Current Offer={self.current_offer}, Current Bid={self.current_bid} (Loop Status)")
                     last_log_time = current_time
                 
-                # DEBUG: Log current prices and entry on every iteration
-                logger.debug(f"DEBUG-EXEC: Epic={self.epic}, Current Bid={self.current_bid}, Current Offer={self.current_offer}, Target Entry={plan.entry}, Action={plan.action.value}")
-
                 # --- Spread and Trigger Logic ---
                 current_spread = round(abs(self.current_offer - self.current_bid), 2)
                 triggered = False
@@ -213,18 +212,51 @@ class StrategyEngine:
                         self.last_skipped_log_time = current_time
                     continue # Skip to next iteration, don't check price trigger
                 
-                if plan.action == Action.BUY:
-                    # Buy if Offer price moves UP to our entry level
-                    if self.current_offer >= plan.entry:
-                        triggered = True
-                        logger.info(f"BUY TRIGGERED: Offer {self.current_offer} >= Entry {plan.entry} (Spread: {current_spread})")
-                        
-                elif plan.action == Action.SELL:
-                    # Sell if Bid price moves DOWN to our entry level
-                    if self.current_bid <= plan.entry:
-                        triggered = True
-                        logger.info(f"SELL TRIGGERED: Bid {self.current_bid} <= Entry {plan.entry} (Spread: {current_spread})")
+                if plan.entry_type == EntryType.INSTANT:
+                    # Logic 1: INSTANT (Touch Entry)
+                    if plan.action == Action.BUY:
+                        if self.current_offer >= plan.entry:
+                            triggered = True
+                            logger.info(f"BUY TRIGGERED (INSTANT): Offer {self.current_offer} >= Entry {plan.entry} (Spread: {current_spread})")
+                            
+                    elif plan.action == Action.SELL:
+                        if self.current_bid <= plan.entry:
+                            triggered = True
+                            logger.info(f"SELL TRIGGERED (INSTANT): Bid {self.current_bid} <= Entry {plan.entry} (Spread: {current_spread})")
                 
+                elif plan.entry_type == EntryType.CONFIRMATION:
+                    # Logic 2: CONFIRMATION (Candle Close)
+                    current_dt = datetime.now()
+                    if current_dt.minute != last_checked_minute:
+                        # Only check once per minute to avoid API spam, slightly after the minute mark ideally
+                        # Fetch last 1-minute candle
+                        try:
+                            # Fetch 2 points to ensure we get the latest completed one
+                            df_1m = self.client.fetch_historical_data(self.epic, "1Min", 2)
+                            if not df_1m.empty:
+                                # IG often returns the *current open* candle as the last row.
+                                # The second to last row is the fully closed candle.
+                                # Or check timestamps.
+                                # For safety, let's look at the latest candle and see if its close breaches.
+                                # If it's a "closed" candle, we use it. If it's live, we use it (proxy for "closing").
+                                # Standard approach: Wait for candle to *complete*.
+                                # Let's assume the last row is the current forming candle. 
+                                # So we look at df_1m.iloc[-2] if len >= 2
+                                if len(df_1m) >= 2:
+                                    last_closed_candle = df_1m.iloc[-2]
+                                    close_price = last_closed_candle['close']
+                                    
+                                    if plan.action == Action.BUY and close_price > plan.entry:
+                                        triggered = True
+                                        logger.info(f"BUY TRIGGERED (CONFIRMATION): 1m Close {close_price} > Entry {plan.entry}")
+                                    elif plan.action == Action.SELL and close_price < plan.entry:
+                                        triggered = True
+                                        logger.info(f"SELL TRIGGERED (CONFIRMATION): 1m Close {close_price} < Entry {plan.entry}")
+                                        
+                                    last_checked_minute = current_dt.minute
+                        except Exception as e:
+                            logger.error(f"Error fetching 1m data for confirmation: {e}")
+
                 if triggered:
                     success = self._place_market_order(plan, current_spread, dry_run=self.dry_run)
                     if not success:
@@ -394,7 +426,13 @@ class StrategyEngine:
             # Start Monitoring (Update upon close) - Blocking call
             if not dry_run and deal_id:
                 logger.info(f"Starting to monitor trade {deal_id}...")
-                self.trade_monitor.monitor_trade(deal_id, self.epic)
+                self.trade_monitor.monitor_trade(
+                    deal_id, 
+                    self.epic, 
+                    entry_price=plan.entry, 
+                    stop_loss=plan.stop_loss, 
+                    atr=plan.atr
+                )
             
             return True
             

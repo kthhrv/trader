@@ -36,7 +36,8 @@ class TestTradeLoggerDB(unittest.TestCase):
         self.assertIn("INSERT INTO trade_log", args[0])
         params = args[1]
         self.assertEqual(params[1], "TEST") # epic
-        self.assertEqual(params[12], "DEAL123") # deal_id
+        self.assertEqual(params[11], 5.0) # atr
+        self.assertEqual(params[13], "DEAL123") # deal_id
         
         mock_conn.commit.assert_called_once()
         mock_conn.close.assert_called_once()

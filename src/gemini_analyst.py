@@ -17,6 +17,10 @@ class Action(str, Enum):
     SELL = "SELL"
     WAIT = "WAIT"
 
+class EntryType(str, Enum):
+    INSTANT = "INSTANT"
+    CONFIRMATION = "CONFIRMATION"
+
 class TradingSignal(BaseModel):
 
     ticker: str = Field(description="The ticker symbol of the asset analyzed.")
@@ -24,6 +28,8 @@ class TradingSignal(BaseModel):
     action: Action = Field(description="The trading action recommendation.")
 
     entry: float = Field(description="The suggested entry price level.")
+    
+    entry_type: EntryType = Field(description="The type of entry: 'INSTANT' (execute immediately when price touches level) or 'CONFIRMATION' (wait for 1-minute candle close beyond level). Default to INSTANT for high momentum, CONFIRMATION for risky setups.", default=EntryType.INSTANT)
 
     stop_loss: float = Field(description="The stop loss price level.")
 
@@ -58,13 +64,16 @@ class GeminiAnalyst:
             STRICT RULES:
             1. Always analyze the risk/reward ratio. Ensure Stop Loss is logical based on recent support/resistance and **AT LEAST 1.0x ATR** from the entry price, with a minimum of 10 POINTS.
             2. If the market conditions are choppy, low liquidity, or unclear (e.g., conflicting signals), recommend 'WAIT'.
-            3. Your output MUST follow a Chain-of-Thought process BEFORE the JSON, like this:
+            3. **Entry Type Strategy:**
+               - Select **'INSTANT'** if momentum is strong and you want to catch a fast breakout immediately upon touching the level.
+               - Select **'CONFIRMATION'** if the level is major support/resistance and there is a risk of a "fakeout". This tells the bot to wait for a 1-minute candle CLOSE beyond the level before entering.
+            4. Your output MUST follow a Chain-of-Thought process BEFORE the JSON, like this:
                *   **Market Overview:** Summarize the current trend, volatility (ATR), and momentum (RSI).
                *   **Key Levels:** Identify significant support and resistance levels from the OHLC data.
                *   **News Sentiment:** Evaluate the overall sentiment from the provided news headlines (Positive, Negative, Neutral).
-               *   **Trade Rationale:** Based on the above, explain WHY a BUY/SELL/WAIT signal is generated. Justify entry, stop loss, take profit, trade size, and why the **ATR-based stop** is appropriate.
+               *   **Trade Rationale:** Based on the above, explain WHY a BUY/SELL/WAIT signal is generated. Justify entry, stop loss, take profit, trade size, and why the **ATR-based stop** is appropriate. Explicitly justify the choice of 'INSTANT' vs 'CONFIRMATION' entry.
                *   **Risk/Reward:** Briefly state the estimated risk/reward for the proposed trade.
-            4. After the Chain-of-Thought, your final output MUST be strictly in the requested JSON format, and ONLY the JSON. Ensure the 'atr' field reflects the current ATR value provided in the market context.
+            5. After the Chain-of-Thought, your final output MUST be strictly in the requested JSON format, and ONLY the JSON. Ensure the 'atr' field reflects the current ATR value provided in the market context.
             """
         )
 
@@ -88,6 +97,9 @@ class GeminiAnalyst:
             
             # The SDK with response_schema automatically handles the schema enforcement
             signal_data = json.loads(response.text)
+            # Handle potential missing entry_type from older models or if omitted (default fallback)
+            if 'entry_type' not in signal_data:
+                signal_data['entry_type'] = EntryType.INSTANT
             return TradingSignal(**signal_data)
 
         except Exception as e:

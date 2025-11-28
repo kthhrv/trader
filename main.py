@@ -1,3 +1,6 @@
+import warnings
+warnings.simplefilter(action='ignore', category=FutureWarning)
+
 import time
 import logging
 import signal
@@ -109,18 +112,48 @@ def run_recent_trades(limit: int):
         print("No recent trades found.")
         return
     
-    print("\n" + "="*60)
-    print(f"RECENT TRADES (Last {limit})")
-    print("="*60)
+    print(f"\n{'='*80}")
+    title = f"RECENT TRADES (Last {limit})"
+    print(f"{title:^80}")
+    print(f"{'='*80}")
+    
     for trade in trades:
-        print(f"Timestamp: {trade['timestamp']}")
-        print(f"Deal ID: {trade['deal_id']}")
-        print(f"Epic: {trade['epic']}")
-        print(f"Action: {trade['action']} @ {trade['entry']} (SL: {trade['stop_loss']}, TP: {trade['take_profit']})")
-        print(f"Outcome: {trade['outcome']} (Dry Run: {trade['is_dry_run']})")
-        print(f"Reasoning: {trade['reasoning'][:70]}...") # Truncate for display
-        print("-"*60)
-    print("="*60 + "\n")
+        # Parse timestamps to calculate duration
+        entry_time_str = trade.get('timestamp')
+        exit_time_str = trade.get('exit_time')
+        duration_str = "Active"
+        
+        if entry_time_str and exit_time_str:
+            try:
+                start = datetime.fromisoformat(entry_time_str)
+                end = datetime.fromisoformat(exit_time_str)
+                duration = end - start
+                duration_str = str(duration).split('.')[0] # Remove microseconds
+            except ValueError:
+                duration_str = "Error"
+
+        pnl = trade.get('pnl')
+        pnl_str = f"£{pnl:.2f}" if pnl is not None else "N/A"
+        
+        # Simple color for PnL (Green/Red/Reset)
+        color = ""
+        reset = ""
+        if sys.stdout.isatty():
+            if pnl is not None and pnl > 0:
+                color = "\033[92m" # Green
+            elif pnl is not None and pnl < 0:
+                color = "\033[91m" # Red
+            reset = "\033[0m"
+
+        print(f"Deal ID:   {trade['deal_id']}")
+        print(f"Time:      {entry_time_str} -> {exit_time_str or 'Active'}")
+        print(f"Epic:      {trade['epic']} ({trade['action']})")
+        print(f"Entry:     {trade['entry']} | Exit: {trade.get('exit_price') or 'N/A'}")
+        print(f"Result:    {color}{pnl_str}{reset} ({trade['outcome']})")
+        print(f"Duration:  {duration_str}")
+        print(f"Reasoning: {trade['reasoning'][:100]}...") 
+        print(f"{'-'*80}")
+    print("\n")
 
 def run_strategy(epic: str, strategy_name: str, news_query: str = None, dry_run: bool = False, verbose: bool = False, timeout_seconds: int = 5400, max_spread: float = 2.0):
     """

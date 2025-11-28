@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import MagicMock, patch
 import json
-from src.gemini_analyst import GeminiAnalyst, TradingSignal, Action
+from src.gemini_analyst import GeminiAnalyst, TradingSignal, Action, EntryType
 
 # Mock response class to simulate Gemini's return object
 class MockGeminiResponse:
@@ -19,15 +19,15 @@ def test_analyze_market_success(mock_genai):
     mock_genai.GenerativeModel.return_value = mock_model
     
     # Define expected JSON response from Gemini
-    # Define expected JSON response from Gemini
     expected_response = {
         "ticker": "FTSE100",
         "action": "BUY",
         "entry": 7510.0,
+        "entry_type": "INSTANT",
         "stop_loss": 7490.0,
         "take_profit": 7550.0,
         "size": 1.0, 
-        "atr": 15.0, # Added ATR
+        "atr": 15.0,
         "confidence": "high",
         "reasoning": "Breakout above resistance with strong volume."
     }
@@ -42,6 +42,7 @@ def test_analyze_market_success(mock_genai):
     assert result.ticker == "FTSE100"
     assert result.action == Action.BUY
     assert result.entry == 7510.0
+    assert result.entry_type == EntryType.INSTANT
     assert result.confidence == "high"
     assert result.size == 1.0
     
@@ -67,6 +68,7 @@ def test_analyze_market_wait_action(mock_genai):
         "ticker": "NONE",
         "action": "WAIT",
         "entry": 0.0,
+        "entry_type": "INSTANT",
         "stop_loss": 0.0,
         "take_profit": 0.0,
         "size": 0.0,

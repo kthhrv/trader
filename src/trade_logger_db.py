@@ -30,8 +30,8 @@ class TradeLoggerDB:
                 INSERT INTO trade_log (
                     timestamp, epic, action, entry, stop_loss, take_profit,
                     size, outcome, reasoning, confidence, spread_at_entry,
-                    is_dry_run, deal_id
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    atr, is_dry_run, deal_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 timestamp,
                 epic,
@@ -44,6 +44,7 @@ class TradeLoggerDB:
                 plan.reasoning,
                 plan.confidence,
                 spread_at_entry,
+                plan.atr,
                 is_dry_run,
                 deal_id
             ))

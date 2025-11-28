@@ -141,7 +141,13 @@ def test_e2e_trading_flow(e2e_mocks, caplog):
     assert call_kwargs['limit_level'] == take_profit
     
     # Verify trade monitor started
-    mock_trade_monitor.monitor_trade.assert_called_once_with("MOCK_DEAL_ID", epic)
+    mock_trade_monitor.monitor_trade.assert_called_once_with(
+        "MOCK_DEAL_ID", 
+        epic, 
+        entry_price=entry_price, 
+        stop_loss=stop_loss, 
+        atr=10.0
+    )
 
     # 6. Simulate Trade Closure (e.g., hitting stop loss/take profit or manual close)
     # The TradeMonitorDB will poll, so we simulate its client calls

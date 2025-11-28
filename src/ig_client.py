@@ -237,6 +237,28 @@ class IGClient:
             logger.error(f"Order placement failed: {e}")
             raise
 
+    def update_open_position(self, deal_id: str, stop_level: float = None, limit_level: float = None):
+        """
+        Updates an existing open position (e.g. moves stop loss or take profit).
+        """
+        if not self.authenticated:
+            self.authenticate()
+
+        try:
+            response = self.service.edit_open_position(
+                deal_id=deal_id,
+                stop_level=stop_level,
+                limit_level=limit_level
+            )
+            
+            # Check confirmation if available, or just return response
+            logger.info(f"Updated position {deal_id}: Stop={stop_level}, Limit={limit_level}. Response: {response}")
+            return response
+
+        except Exception as e:
+            logger.error(f"Failed to update position {deal_id}: {e}")
+            raise
+
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=10),
