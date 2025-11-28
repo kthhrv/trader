@@ -84,6 +84,19 @@ Fetch and print the latest market news without trading:
 python main.py --news-only --market london
 ```
 
+## 🧪 Testing
+
+The project includes a comprehensive test suite using `pytest`.
+
+*   **Unit Tests:** Verify individual components like `IGClient`, `GeminiAnalyst`, and `Database` interactions.
+*   **End-to-End (E2E) Flow:** Simulates the entire trading lifecycle from signal generation to order placement and monitoring (`tests/test_e2e_flow.py`).
+*   **Advanced Scenarios:** Validates complex behaviors like **Confirmation Entries** (waiting for candle close), **Dynamic Trailing Stops** (1.5R Breakeven + 2.0x ATR Trail), and **Fixed Take Profits** (`tests/test_e2e_advanced.py`).
+
+Run the tests:
+```bash
+pytest
+```
+
 ## 🛡 Safety Mechanisms
 
 *   **Paper Trading Default:** `IS_LIVE` defaults to `false`.
