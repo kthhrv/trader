@@ -171,12 +171,13 @@ def test_e2e_trailing_stop(advanced_mocks, caplog):
     # Initial State
     initial_pos = {'dealId': 'MOCK_DEAL_ID', 'direction': 'BUY', 'bid': 7500, 'offer': 7501, 'stopLevel': 7450}
     
-    # Move 1: Profit = 1.0R (50 pts). Price = 7550. Stop should move to Breakeven (7500).
+    # Move 1: Profit = 1.0R (50 pts). Price = 7550. 
+    # NEW LOGIC: Stop should NOT move (Wait for 1.5R).
     move_1_pos = {'dealId': 'MOCK_DEAL_ID', 'direction': 'BUY', 'bid': 7550, 'offer': 7551, 'stopLevel': 7450}
     
-    # Move 2: Profit = 1.5R (75 pts). Price = 7575. Stop should trail to Price - 1R (7575 - 50 = 7525).
-    # Assuming update_open_position succeeded and updated the stopLevel on the server side.
-    move_2_pos = {'dealId': 'MOCK_DEAL_ID', 'direction': 'BUY', 'bid': 7575, 'offer': 7576, 'stopLevel': 7500} # Stop was at BE
+    # Move 2: Profit = 1.5R (75 pts). Price = 7575.
+    # NEW LOGIC: Breakeven triggers (7500). Trailing triggers (2.0 ATR = 20 pts -> 7555).
+    move_2_pos = {'dealId': 'MOCK_DEAL_ID', 'direction': 'BUY', 'bid': 7575, 'offer': 7576, 'stopLevel': 7450} 
     
     # Close
     close_pos = None
@@ -186,8 +187,8 @@ def test_e2e_trailing_stop(advanced_mocks, caplog):
     # or just sequence them.
     mock_ig_client.fetch_open_position_by_deal_id.side_effect = [
         initial_pos, initial_pos, 
-        move_1_pos, move_1_pos, # Trigger Breakeven
-        move_2_pos, move_2_pos, # Trigger Trailing
+        move_1_pos, move_1_pos, # Should NOT trigger
+        move_2_pos, move_2_pos, # Should trigger Breakeven AND Trailing
         close_pos
     ]
     
@@ -202,6 +203,6 @@ def test_e2e_trailing_stop(advanced_mocks, caplog):
     args1 = mock_ig_client.update_open_position.call_args_list[0]
     assert args1[1]['stop_level'] == 7500.0 # Entry Price
     
-    # Second update: Trailing
+    # Second update: Trailing (ATR 10 * 2 = 20. Price 7575 - 20 = 7555)
     args2 = mock_ig_client.update_open_position.call_args_list[1]
-    assert args2[1]['stop_level'] == 7525.0 # 7575 - 50
+    assert args2[1]['stop_level'] == 7555.0 # 7575 - 20

@@ -12,14 +12,14 @@ class TradeMonitorDB:
         self.db_path = db_path
         self.polling_interval = polling_interval
 
-    def monitor_trade(self, deal_id: str, epic: str, entry_price: float = None, stop_loss: float = None, atr: float = None, polling_interval: int = None, max_duration: int = 14400):
+    def monitor_trade(self, deal_id: str, epic: str, entry_price: float = None, stop_loss: float = None, atr: float = None, polling_interval: int = None, max_duration: int = 14400, use_trailing_stop: bool = True):
         """
         Monitors an active trade, manages stops (Breakeven/Trailing), and logs outcome.
         """
         if polling_interval is None:
             polling_interval = self.polling_interval
 
-        logger.info(f"Starting Monitor & Manage for Deal {deal_id}. Risk: {entry_price}->{stop_loss}, ATR: {atr}")
+        logger.info(f"Starting Monitor & Manage for Deal {deal_id}. Risk: {entry_price}->{stop_loss}, ATR: {atr}, Trailing: {use_trailing_stop}")
         
         start_time = time.time()
         active = True
@@ -49,24 +49,29 @@ class TradeMonitorDB:
                     current_stop = float(position.get('stopLevel', 0.0)) # May be None if guaranteedStop used? No, standard stop.
                     
                     # --- Active Trade Management ---
-                    if risk_distance > 0 and direction:
+                    if use_trailing_stop and risk_distance > 0 and direction:
                         current_price = current_bid if direction == 'BUY' else current_offer # Conservative price
                         profit_dist = (current_price - entry_price) if direction == 'BUY' else (entry_price - current_price)
                         
-                        # Rule 1: Breakeven at 1.0R
-                        if not moved_to_breakeven and profit_dist >= (1.0 * risk_distance):
-                            new_stop = entry_price # Or entry + small buffer
+                        # Rule 1: Breakeven at 1.5R (Avoid 1R trap)
+                        if not moved_to_breakeven and profit_dist >= (1.5 * risk_distance):
+                            new_stop = entry_price 
                             if (direction == 'BUY' and new_stop > current_stop) or (direction == 'SELL' and new_stop < current_stop):
                                 logger.info(f"Moving Stop to BREAKEVEN for {deal_id}")
                                 self.client.update_open_position(deal_id, stop_level=new_stop)
                                 moved_to_breakeven = True
+                                current_stop = new_stop # Update local tracker
 
-                        # Rule 2: Trail at 1.5R
-                        elif profit_dist >= (1.5 * risk_distance):
-                            # Trail to lock in profit: Price - 1.0R (lock in 0.5R)
-                            # Or standard trailing stop logic. Let's use 1.0R trail.
-                            desired_stop_dist = 1.0 * risk_distance
-                            new_stop = (current_price - desired_stop_dist) if direction == 'BUY' else (current_price + desired_stop_dist)
+                        # Rule 2: Dynamic Trailing (ATR based)
+                        # Start trailing once we are deep in profit (>= 1.5R)
+                        if profit_dist >= (1.5 * risk_distance):
+                            # Calculate Trail Distance: Prefer 2.0 * ATR, fallback to 1.0 * Risk
+                            if atr and atr > 0:
+                                trail_dist = 2.0 * atr
+                            else:
+                                trail_dist = 1.0 * risk_distance
+                            
+                            new_stop = (current_price - trail_dist) if direction == 'BUY' else (current_price + trail_dist)
                             
                             # Only move if it reduces risk (higher for BUY, lower for SELL)
                             if (direction == 'BUY' and new_stop > current_stop) or (direction == 'SELL' and new_stop < current_stop):
