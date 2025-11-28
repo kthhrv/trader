@@ -6,6 +6,8 @@ import logging
 import signal
 import sys
 import argparse
+import pandas as pd
+import pandas_ta as ta
 from datetime import datetime, timedelta
 from apscheduler.schedulers.blocking import BlockingScheduler
 from src.strategy_engine import StrategyEngine
@@ -41,7 +43,7 @@ MARKET_CONFIGS = {
         "news_query": "S&P 500 US Economy",
         "schedule": {"day_of_week": 'mon-fri', "hour": 9, "minute": 15, "timezone": 'America/New_York'},
         "timeout_seconds": 5400, # 90 minutes
-        "max_spread": 1.0
+        "max_spread": 1.6
     },
     "nikkei": {
         "epic": "IX.D.NIKKEI.DAILY.IP",
@@ -52,6 +54,56 @@ MARKET_CONFIGS = {
         "max_spread": 8.0
     }
 }
+
+def run_volatility_check(epic: str):
+    """
+    Fetches and prints current market volatility metrics (Candle Range & ATR).
+    """
+    logger.info(f"Checking volatility for {epic}...")
+    client = IGClient()
+    
+    try:
+        # 1. Fetch latest 1-minute *completed* candle (fetch 2 to get the last complete one)
+        df_1m = client.fetch_historical_data(epic, "1Min", 2)
+        
+        # 2. Fetch 15-minute data for ATR calculation (50 points for warmup)
+        df_15m = client.fetch_historical_data(epic, "15Min", 50)
+        
+        print(f"\n{'='*60}")
+        print(f"VOLATILITY REPORT: {epic}")
+        print(f"{'='*60}")
+        
+        # Analyze 1-Minute Candle
+        if not df_1m.empty and len(df_1m) >= 2:
+            latest_completed_1m = df_1m.iloc[-2]
+            high_1m = float(latest_completed_1m['high'])
+            low_1m = float(latest_completed_1m['low'])
+            range_1m = round(high_1m - low_1m, 2)
+            close_1m = float(latest_completed_1m['close'])
+            print(f"Latest Completed 1-Min Candle ({latest_completed_1m.name}):")
+            print(f"  Close: {close_1m}")
+            print(f"  High:  {high_1m}")
+            print(f"  Low:   {low_1m}")
+            print(f"  Range: {range_1m} points")
+        else:
+            print("  Error: Could not fetch latest completed 1-minute candle.")
+
+        # Analyze ATR (15-Min)
+        if not df_15m.empty and len(df_15m) >= 14:
+            df_15m['ATR'] = ta.atr(df_15m['high'], df_15m['low'], df_15m['close'], length=14)
+            if 'ATR' in df_15m.columns and not df_15m['ATR'].isnull().all():
+                latest_atr = round(float(df_15m['ATR'].iloc[-1]), 2)
+                print(f"\nVolatility Context (15-Min Resolution):")
+                print(f"  ATR (14): {latest_atr} points")
+            else:
+                print("\n  Error: ATR calculation failed (NaN values).")
+        else:
+            print("\n  Error: Insufficient data for ATR calculation.")
+            
+        print(f"{'='*60}\n")
+        
+    except Exception as e:
+        logger.error(f"Failed to check volatility: {e}")
 
 def run_post_mortem(deal_id: str):
     """
@@ -197,6 +249,7 @@ def main():
     parser.add_argument("--news-only", action="store_true", help="Only fetch and print news for the selected market/query then exit")
     parser.add_argument("--post-mortem", type=str, help="Run post-mortem analysis on a specific deal ID.")
     parser.add_argument("--recent-trades", type=int, nargs="?", const=5, help="Print N recent trades. Defaults to 5 if no number provided.")
+    parser.add_argument("--volatility-check", action="store_true", help="Check current market volatility (Range/ATR) for the selected market/epic.")
     parser.add_argument("--verbose", "-v", action="store_true", help="Print live prices to console")
     
     market_group = parser.add_mutually_exclusive_group()
@@ -209,6 +262,15 @@ def main():
     # Register signal handlers
     signal.signal(signal.SIGINT, graceful_shutdown)
     signal.signal(signal.SIGTERM, graceful_shutdown)
+
+    if args.volatility_check:
+        if args.market:
+            run_volatility_check(MARKET_CONFIGS[args.market]["epic"])
+        elif args.epic:
+            run_volatility_check(args.epic)
+        else:
+            logger.error("When --volatility-check is used, either --epic or --market must be specified.")
+        return
 
     if args.post_mortem:
         run_post_mortem(args.post_mortem)
