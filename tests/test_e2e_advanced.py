@@ -51,7 +51,7 @@ def test_e2e_confirmation_entry(advanced_mocks, caplog):
     mock_gemini_analyst.analyze_market.return_value = TradingSignal(
         ticker=epic, action=Action.BUY, entry=entry_price, stop_loss=7450.0, 
         take_profit=7600.0, confidence="high", reasoning="Test Confirmation", size=1.0, atr=10.0,
-        entry_type=EntryType.CONFIRMATION
+        entry_type=EntryType.CONFIRMATION, use_trailing_stop=True
     )
     
     engine = StrategyEngine(
@@ -139,7 +139,7 @@ def test_e2e_trailing_stop(advanced_mocks, caplog):
     mock_gemini_analyst.analyze_market.return_value = TradingSignal(
         ticker=epic, action=Action.BUY, entry=entry_price, stop_loss=stop_loss, 
         take_profit=7600.0, confidence="high", reasoning="Test Trailing", size=1.0, atr=10.0,
-        entry_type=EntryType.INSTANT
+        entry_type=EntryType.INSTANT, use_trailing_stop=True
     )
     
     engine = StrategyEngine(

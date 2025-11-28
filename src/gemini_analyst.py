@@ -29,7 +29,7 @@ class TradingSignal(BaseModel):
 
     entry: float = Field(description="The suggested entry price level.")
     
-    entry_type: EntryType = Field(description="The type of entry: 'INSTANT' (execute immediately when price touches level) or 'CONFIRMATION' (wait for 1-minute candle close beyond level). Default to INSTANT for high momentum, CONFIRMATION for risky setups.", default=EntryType.INSTANT)
+    entry_type: EntryType = Field(description="The type of entry: 'INSTANT' (execute immediately when price touches level) or 'CONFIRMATION' (wait for 1-minute candle close beyond level). Default to INSTANT for high momentum, CONFIRMATION for risky setups.")
 
     stop_loss: float = Field(description="The stop loss price level.")
 
@@ -38,6 +38,8 @@ class TradingSignal(BaseModel):
     size: float = Field(description="The suggested trade size per point.")
 
     atr: float = Field(description="The Average True Range (ATR) at the time of analysis.")
+
+    use_trailing_stop: bool = Field(description="Whether to use a dynamic trailing stop (True) or a fixed take profit (False). Set to True for breakout/trend strategies to maximize runs. Set to False for range/mean-reversion strategies where price is expected to reverse at target.")
 
     confidence: str = Field(description="Confidence level of the analysis (e.g., 'high', 'medium', 'low').")
 
@@ -67,13 +69,16 @@ class GeminiAnalyst:
             3. **Entry Type Strategy:**
                - Select **'INSTANT'** if momentum is strong and you want to catch a fast breakout immediately upon touching the level.
                - Select **'CONFIRMATION'** if the level is major support/resistance and there is a risk of a "fakeout". This tells the bot to wait for a 1-minute candle CLOSE beyond the level before entering.
-            4. Your output MUST follow a Chain-of-Thought process BEFORE the JSON, like this:
+            4. **Trailing Stop Strategy:**
+               - Set **'use_trailing_stop' = True** if the setup is a high-momentum breakout where price could run significantly (Trend Following).
+               - Set **'use_trailing_stop' = False** if the setup is targeting a specific resistance level or trading inside a range (Mean Reversion), where a fixed Take Profit is better.
+            5. Your output MUST follow a Chain-of-Thought process BEFORE the JSON, like this:
                *   **Market Overview:** Summarize the current trend, volatility (ATR), and momentum (RSI).
                *   **Key Levels:** Identify significant support and resistance levels from the OHLC data.
                *   **News Sentiment:** Evaluate the overall sentiment from the provided news headlines (Positive, Negative, Neutral).
-               *   **Trade Rationale:** Based on the above, explain WHY a BUY/SELL/WAIT signal is generated. Justify entry, stop loss, take profit, trade size, and why the **ATR-based stop** is appropriate. Explicitly justify the choice of 'INSTANT' vs 'CONFIRMATION' entry.
+               *   **Trade Rationale:** Based on the above, explain WHY a BUY/SELL/WAIT signal is generated. Justify entry, stop loss, take profit, trade size, and why the **ATR-based stop** is appropriate. Explicitly justify the choice of 'INSTANT' vs 'CONFIRMATION' entry AND 'use_trailing_stop'.
                *   **Risk/Reward:** Briefly state the estimated risk/reward for the proposed trade.
-            5. After the Chain-of-Thought, your final output MUST be strictly in the requested JSON format, and ONLY the JSON. Ensure the 'atr' field reflects the current ATR value provided in the market context.
+            6. After the Chain-of-Thought, your final output MUST be strictly in the requested JSON format, and ONLY the JSON. Ensure the 'atr' field reflects the current ATR value provided in the market context.
             """
         )
 
@@ -100,6 +105,8 @@ class GeminiAnalyst:
             # Handle potential missing entry_type from older models or if omitted (default fallback)
             if 'entry_type' not in signal_data:
                 signal_data['entry_type'] = EntryType.INSTANT
+            if 'use_trailing_stop' not in signal_data:
+                signal_data['use_trailing_stop'] = True # Default to True (original behavior)
             return TradingSignal(**signal_data)
 
         except Exception as e:

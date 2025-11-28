@@ -86,11 +86,11 @@ class MockGeminiAnalyst:
     def __init__(self):
         # Default mock for analyze_market - returns a simple BUY signal
         self.analyze_market = MagicMock(return_value=TradingSignal(
-            ticker="FTSE100", action=Action.BUY, entry=7500, stop_loss=7450, 
-            take_profit=7600, confidence="high", reasoning="Mock Buy", size=1, atr=15.0
+            ticker="FTSE100", action=Action.BUY, entry=7500, stop_loss=7450,
+            take_profit=7600, confidence="high", reasoning="Mock Buy", size=1, atr=15.0,
+            entry_type="INSTANT", use_trailing_stop=True
         ))
         self.generate_post_mortem = MagicMock(return_value="Mock Post-Mortem Report")
-
 
 class MockStreamManager:
     def __init__(self):

@@ -75,7 +75,8 @@ def test_generate_plan_success(mock_components):
     # Mock analysis result
     mock_signal = TradingSignal(
         ticker="FTSE", action=Action.BUY, entry=7500, stop_loss=7450, 
-        take_profit=7600, confidence="high", reasoning="Test", size=1, atr=15.0
+        take_profit=7600, confidence="high", reasoning="Test", size=1, atr=15.0,
+        entry_type="INSTANT", use_trailing_stop=True
     )
     mock_analyst.analyze_market.return_value = mock_signal
     
@@ -102,7 +103,8 @@ def test_generate_plan_wait(mock_components, caplog):
     # Mock analysis result to return Action.WAIT
     mock_signal = TradingSignal(
         ticker="FTSE", action=Action.WAIT, entry=0, stop_loss=0, 
-        take_profit=0, confidence="low", reasoning="Market is uncertain", size=0, atr=0.0
+        take_profit=0, confidence="low", reasoning="Market is uncertain", size=0, atr=0.0,
+        entry_type="INSTANT", use_trailing_stop=True
     )
     mock_analyst.analyze_market.return_value = mock_signal
 
@@ -144,13 +146,14 @@ def test_generate_plan_holiday(mock_components, caplog):
     mock_analyst.analyze_market.assert_not_called()
 
 def test_poll_market_triggers_buy(mock_components):
-    mock_client, _, mock_trade_logger, mock_trade_monitor, _, mock_stream_manager, mock_engine = mock_components
-    engine = StrategyEngine("EPIC")
+    mock_client, mock_analyst, mock_trade_logger, mock_trade_monitor, mock_market_status, mock_stream_manager, _ = mock_components # Unpack all components
+    engine = StrategyEngine("EPIC", ig_client=mock_client, analyst=mock_analyst, news_fetcher=MagicMock(), trade_logger=mock_trade_logger, trade_monitor=mock_trade_monitor, market_status=mock_market_status, stream_manager=mock_stream_manager)
     
     # Setup active plan
     plan_to_trigger = TradingSignal(
         ticker="FTSE", action=Action.BUY, entry=7500, stop_loss=7450,
-        take_profit=7600, confidence="high", reasoning="Test", size=1, atr=15.0
+        take_profit=7600, confidence="high", reasoning="Test", size=1, atr=15.0,
+        entry_type="INSTANT", use_trailing_stop=True
     )
     engine.active_plan = plan_to_trigger
     
@@ -209,12 +212,13 @@ def test_poll_market_triggers_buy(mock_components):
     mock_stream_manager.stop.assert_called_once()
 
 def test_poll_market_no_trigger(mock_components):
-    mock_client, _, mock_trade_logger, mock_trade_monitor, _, mock_stream_manager, mock_engine = mock_components
-    engine = StrategyEngine("EPIC")
+    mock_client, mock_analyst, mock_trade_logger, mock_trade_monitor, mock_market_status, mock_stream_manager, _ = mock_components
+    engine = StrategyEngine("EPIC", ig_client=mock_client, analyst=mock_analyst, news_fetcher=MagicMock(), trade_logger=mock_trade_logger, trade_monitor=mock_trade_monitor, market_status=mock_market_status, stream_manager=mock_stream_manager)
     
     engine.active_plan = TradingSignal(
         ticker="FTSE", action=Action.BUY, entry=7500, stop_loss=7450, 
-        take_profit=7600, confidence="high", reasoning="Test", size=1, atr=15.0
+        take_profit=7600, confidence="high", reasoning="Test", size=1, atr=15.0,
+        entry_type="INSTANT", use_trailing_stop=True
     )
     
     # Set initial current prices
@@ -243,13 +247,14 @@ def test_poll_market_no_trigger(mock_components):
     mock_stream_manager.stop.assert_called_once()
 
 def test_place_market_order_spread_too_wide(mock_components, caplog):
-    mock_client, _, mock_trade_logger, mock_trade_monitor, _, mock_stream_manager, mock_engine = mock_components
-    engine = StrategyEngine("EPIC", max_spread=1.0) # Set max_spread
+    mock_client, mock_analyst, mock_trade_logger, mock_trade_monitor, mock_market_status, mock_stream_manager, mock_engine_unused = mock_components
+    engine = StrategyEngine("EPIC", max_spread=1.0, ig_client=mock_client, analyst=mock_analyst, news_fetcher=MagicMock(), trade_logger=mock_trade_logger, trade_monitor=mock_trade_monitor, market_status=mock_market_status, stream_manager=mock_stream_manager) # Set max_spread
     
     # Setup active plan
     plan_to_trigger = TradingSignal(
         ticker="FTSE", action=Action.BUY, entry=7500, stop_loss=7450,
-        take_profit=7600, confidence="high", reasoning="Test", size=1, atr=15.0
+        take_profit=7600, confidence="high", reasoning="Test", size=1, atr=15.0,
+        entry_type="INSTANT", use_trailing_stop=True
     )
     engine.active_plan = plan_to_trigger
 
@@ -297,14 +302,15 @@ def test_place_market_order_spread_too_wide(mock_components, caplog):
         mock_trade_monitor.monitor_trade.assert_not_called()
         mock_stream_manager.stop.assert_called_once()
 def test_place_market_order_stop_too_tight(mock_components, caplog):
-    mock_client, _, mock_trade_logger, mock_trade_monitor, _, mock_stream_manager, mock_engine = mock_components
-    engine = StrategyEngine("EPIC")
+    mock_client, mock_analyst, mock_trade_logger, mock_trade_monitor, mock_market_status, mock_stream_manager, mock_engine_unused = mock_components
+    engine = StrategyEngine("EPIC", ig_client=mock_client, analyst=mock_analyst, news_fetcher=MagicMock(), trade_logger=mock_trade_logger, trade_monitor=mock_trade_monitor, market_status=mock_market_status, stream_manager=mock_stream_manager)
     
     # Setup active plan with a tight stop relative to ATR
     # ATR = 15.0, Entry = 7500, Stop = 7490. Stop distance = 10. Ratio = 10/15 = 0.66 < 1.0
     plan_to_trigger = TradingSignal(
         ticker="FTSE", action=Action.BUY, entry=7500, stop_loss=7490,
-        take_profit=7600, confidence="high", reasoning="Test", size=1, atr=15.0
+        take_profit=7600, confidence="high", reasoning="Test", size=1, atr=15.0,
+        entry_type="INSTANT", use_trailing_stop=True
     )
     engine.active_plan = plan_to_trigger
 
@@ -355,13 +361,14 @@ def test_place_market_order_stop_too_tight(mock_components, caplog):
         mock_stream_manager.stop.assert_called_once()
 
 def test_place_market_order_dry_run(mock_components, caplog):
-    mock_client, _, mock_trade_logger, mock_trade_monitor, _, mock_stream_manager, mock_engine = mock_components
-    engine = StrategyEngine("EPIC", dry_run=True) # Set dry_run to True
+    mock_client, mock_analyst, mock_trade_logger, mock_trade_monitor, mock_market_status, mock_stream_manager, mock_engine_unused = mock_components
+    engine = StrategyEngine("EPIC", dry_run=True, ig_client=mock_client, analyst=mock_analyst, news_fetcher=MagicMock(), trade_logger=mock_trade_logger, trade_monitor=mock_trade_monitor, market_status=mock_market_status, stream_manager=mock_stream_manager) # Set dry_run to True
 
     # Setup active plan
     plan_to_trigger = TradingSignal(
         ticker="FTSE", action=Action.BUY, entry=7500, stop_loss=7450,
-        take_profit=7600, confidence="high", reasoning="Test", size=1, atr=15.0
+        take_profit=7600, confidence="high", reasoning="Test", size=1, atr=15.0,
+        entry_type="INSTANT", use_trailing_stop=True
     )
     engine.active_plan = plan_to_trigger
 

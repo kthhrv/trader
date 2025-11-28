@@ -109,6 +109,8 @@ def test_mock_gemini_analyst_analyze_market(mock_gemini_analyst_instance):
     signal = mock_gemini_analyst_instance.analyze_market(market_context, strategy_name=strategy_name)
     assert isinstance(signal, TradingSignal)
     assert signal.action == Action.BUY
+    assert signal.entry_type == "INSTANT" # Ensure default is set or returned
+    assert signal.use_trailing_stop is True # Ensure default is set or returned
     mock_gemini_analyst_instance.analyze_market.assert_called_once_with(market_context, strategy_name=strategy_name)
 
 def test_mock_gemini_analyst_generate_post_mortem(mock_gemini_analyst_instance):
@@ -176,7 +178,11 @@ def test_mock_news_fetcher_fetch_news(mock_news_fetcher_instance):
 # --- Tests for MockTradeLoggerDB ---
 def test_mock_trade_logger_db_log_trade(mock_trade_logger_instance):
     epic = "TEST_EPIC"
-    plan = TradingSignal(ticker="TEST", action=Action.BUY, entry=100, stop_loss=90, take_profit=110, confidence="low", reasoning="test", size=1, atr=5)
+    plan = TradingSignal(
+        ticker="TEST", action=Action.BUY, entry=100, stop_loss=90, take_profit=110,
+        confidence="low", reasoning="test", size=1, atr=5,
+        entry_type="INSTANT", use_trailing_stop=True
+    )
     outcome = "LIVE_PLACED"
     spread_at_entry = 1.5
     is_dry_run = False

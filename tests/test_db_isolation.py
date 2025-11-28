@@ -52,7 +52,19 @@ def test_trade_logger_uses_custom_db_path(temp_db):
     assert logger_db.db_path == temp_db
     
     # Perform a log operation
-    plan = TradingSignal(ticker="TEST", action=Action.BUY, entry=100, stop_loss=90, take_profit=110, confidence="low", reasoning="test", size=1, atr=5)
+    plan = TradingSignal(
+        ticker="TEST", 
+        action=Action.BUY, 
+        entry=100, 
+        stop_loss=90, 
+        take_profit=110, 
+        confidence="low", 
+        reasoning="test", 
+        size=1, 
+        atr=5,
+        entry_type="INSTANT",
+        use_trailing_stop=True
+    )
     deal_id = "TEST_LOGGER_DEAL"
     logger_db.log_trade("TEST", plan, "TEST_OUTCOME", 1.0, False, deal_id)
     

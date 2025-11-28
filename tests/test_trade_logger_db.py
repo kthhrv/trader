@@ -26,7 +26,9 @@ class TestTradeLoggerDB(unittest.TestCase):
             size=1,
             confidence="high",
             reasoning="test",
-            atr=5.0
+            atr=5.0,
+            entry_type="INSTANT",
+            use_trailing_stop=True
         )
         
         logger.log_trade("TEST", plan, "SUCCESS", 1.5, False, "DEAL123")

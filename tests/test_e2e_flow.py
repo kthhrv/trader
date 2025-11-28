@@ -74,7 +74,8 @@ def test_e2e_trading_flow(e2e_mocks, caplog):
     # Mock Gemini's response for a BUY signal
     mock_gemini_analyst.analyze_market.return_value = TradingSignal(
         ticker=epic, action=Action.BUY, entry=entry_price, stop_loss=stop_loss, 
-        take_profit=take_profit, confidence="high", reasoning="E2E Test Buy", size=trade_size, atr=10.0
+        take_profit=take_profit, confidence="high", reasoning="E2E Test Buy", size=trade_size, atr=10.0,
+        entry_type="INSTANT", use_trailing_stop=True
     )
 
     # Mock _calculate_size directly on the StrategyEngine instance
@@ -142,13 +143,13 @@ def test_e2e_trading_flow(e2e_mocks, caplog):
     
     # Verify trade monitor started
     mock_trade_monitor.monitor_trade.assert_called_once_with(
-        "MOCK_DEAL_ID", 
-        epic, 
-        entry_price=entry_price, 
-        stop_loss=stop_loss, 
-        atr=10.0
+        "MOCK_DEAL_ID",
+        epic,
+        entry_price=entry_price,
+        stop_loss=stop_loss,
+        atr=10.0,
+        use_trailing_stop=True
     )
-
     # 6. Simulate Trade Closure (e.g., hitting stop loss/take profit or manual close)
     # The TradeMonitorDB will poll, so we simulate its client calls
     mock_ig_client.simulate_position_close(pnl=50.0)

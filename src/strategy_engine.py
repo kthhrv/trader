@@ -431,7 +431,8 @@ class StrategyEngine:
                     self.epic, 
                     entry_price=plan.entry, 
                     stop_loss=plan.stop_loss, 
-                    atr=plan.atr
+                    atr=plan.atr,
+                    use_trailing_stop=plan.use_trailing_stop
                 )
             
             return True

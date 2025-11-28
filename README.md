@@ -5,7 +5,7 @@ A fully automated trading bot that leverages Google's **Gemini 3 Pro Preview** (
 ## 🚀 Key Features
 
 *   **Multi-Market Support:** Pre-configured strategies for **London (FTSE 100)**, **New York (S&P 500)**, and **Tokyo (Nikkei 225)**.
-*   **AI Analyst (Gemini 3):** Uses **Chain-of-Thought** reasoning to synthesize technical data and news before making a decision.
+*   **AI Analyst (Gemini 3):** Uses **Chain-of-Thought** reasoning to synthesize technical data and news, and dynamically decides on entry type (`INSTANT` or `CONFIRMATION`) and **trailing stop (on/off)** before making a decision.
 *   **Post-Mortem Analysis:** Generates detailed AI-powered reports on completed trades, analyzing execution, slippage, and plan adherence.
 *   **News Integration:** Real-time sentiment analysis using top headlines from Google News (via `feedparser`).
 *   **Technical Analysis:** Automatically calculates **ATR** (Volatility), **RSI** (Momentum), and **EMA** (Trend) using `pandas-ta`.
@@ -88,6 +88,7 @@ python main.py --news-only --market london
 
 *   **Paper Trading Default:** `IS_LIVE` defaults to `false`.
 *   **Mandatory Stops:** The engine refuses to place orders without a defined Stop Loss.
+*   **Dynamic Trailing Stops:** Profit-taking stops can be dynamically moved to **Breakeven (at 1.5R)** and then **trailed based on 2.0x ATR** to protect and maximize gains, as chosen by Gemini.
 *   **Chain-of-Thought:** The AI must justify its trade with a step-by-step rationale before generating a signal.
 
 ## 📂 Project Structure
