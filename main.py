@@ -155,8 +155,21 @@ def run_volatility_check(epic: str):
             df_15m['ATR'] = ta.atr(df_15m['high'], df_15m['low'], df_15m['close'], length=14)
             if 'ATR' in df_15m.columns and not df_15m['ATR'].isnull().all():
                 latest_atr = round(float(df_15m['ATR'].iloc[-1]), 2)
+                
+                # Calculate relative volatility
+                avg_atr = df_15m['ATR'].mean()
+                vol_ratio = latest_atr / avg_atr if avg_atr > 0 else 1.0
+                
+                vol_state = "MEDIUM"
+                if vol_ratio < 0.8:
+                    vol_state = "LOW"
+                elif vol_ratio > 1.2:
+                    vol_state = "HIGH"
+                
                 print(f"\nVolatility Context (15-Min Resolution):")
                 print(f"  ATR (14): {latest_atr} points")
+                print(f"  Avg ATR:  {round(avg_atr, 2)} points (Last 50 periods)")
+                print(f"  Level:    {vol_state} (Current vs Avg)")
             else:
                 print("\n  Error: ATR calculation failed (NaN values).")
         else:
