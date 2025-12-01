@@ -48,14 +48,41 @@ class TradeMonitorDB:
         # OPU example: {"dealId": "...", "status": "CLOSED", ...}
         
         deal_id = payload.get('dealId')
+        affected_deal_id = payload.get('affectedDealId')
         trade_status = payload.get('status') # CLOSED, OPEN etc.
+        deal_status = payload.get('dealStatus') # ACCEPTED, REJECTED etc (from CONFIRMS)
 
-        if not deal_id or deal_id not in self._active_monitors:
-            logger.debug(f"Received trade update for unmonitored deal ID {deal_id} or no deal ID: {payload}")
+        # Determine which ID matches our monitored list
+        monitored_id = None
+        if deal_id and deal_id in self._active_monitors:
+            monitored_id = deal_id
+        elif affected_deal_id and affected_deal_id in self._active_monitors:
+            monitored_id = affected_deal_id
+
+        logger.info(f"DEBUG: Trade Update. Deal: {deal_id}, Affected: {affected_deal_id}, Status: {trade_status}, DealStatus: {deal_status}, MonitoredID: {monitored_id}")
+
+        if not monitored_id:
+            logger.info(f"Received trade update for unmonitored deal ID {deal_id} or no deal ID.")
             return
 
         # Handle closure event
-        if trade_status == "CLOSED":
+        # 1. Standard OPU with status="CLOSED" or "DELETED" (Position removed)
+        if trade_status == "CLOSED" or trade_status == "DELETED":
+            logger.info(f"STREAM: Trade {monitored_id} detected as {trade_status} via streaming update (OPU/CONFIRMS).")
+            self._active_monitors[monitored_id].set()
+
+        # 2. CONFIRMS for a closing deal (dealStatus=ACCEPTED, status=CLOSED usually, but let's check direction/size implies close?)
+        # Actually, if we matched via affected_deal_id, it implies this new deal is acting on our monitored deal.
+        # If it's a closing order that was ACCEPTED, does that mean it's closed?
+        # A closing order might be partial.
+        # But usually 'status' in CONFIRMS will say "CLOSED" if it fully closed the position?
+        # Let's rely on 'status' == 'CLOSED' which appears in both OPU (Position Closed) and CONFIRMS (Trade Closed).
+        
+        elif deal_status == "ACCEPTED" and trade_status == "CLOSED":
+             logger.info(f"STREAM: Trade {monitored_id} detected as CLOSED via CONFIRMS (AffectedDeal).")
+             self._active_monitors[monitored_id].set()
+
+        elif trade_status == "UPDATED":
             logger.info(f"STREAM: Trade {deal_id} detected as CLOSED via streaming update.")
             
             # Extract PnL and exit price from payload if available
@@ -155,20 +182,49 @@ class TradeMonitorDB:
             final_pnl = 0.0
             final_exit_price = 0.0
             
-            # Attempt to fetch final details from history if needed, or from the streamed payload
-            # For now, we fetch from history as stream payload might not contain full details.
-            try:
-                history_df = self.client.fetch_transaction_history_by_deal_id(deal_id)
-                if history_df is not None and not history_df.empty:
-                    if 'profitAndLoss' in history_df.columns:
-                        val_str = str(history_df.iloc[0]['profitAndLoss']).replace('£', '').replace(',', '')
-                        final_pnl = float(val_str)
-                        logger.info(f"Fetched realized PnL from history: {final_pnl}")
-                    
-                    if 'closeLevel' in history_df.columns:
-                        final_exit_price = float(history_df.iloc[0]['closeLevel'])
-            except Exception as e:
-                logger.warning(f"Could not fetch realized PnL from history for {deal_id}: {e}")
+            # Attempt to fetch final details from history with retries.
+            # The streaming update is often faster than the REST API history update, 
+            # so we poll briefly to ensure we capture the closing transaction.
+            for attempt in range(3):
+                # Give the IG backend a moment to index the transaction
+                time.sleep(2)
+                
+                try:
+                    history_df = self.client.fetch_transaction_history_by_deal_id(deal_id)
+                    if history_df is not None and not history_df.empty:
+                        # We assume the most recent transaction (index 0) is the close.
+                        latest_tx = history_df.iloc[0]
+                        
+                        # Extract PnL
+                        pnl_raw = latest_tx.get('profitAndLoss', '0')
+                        val_str = str(pnl_raw).replace('£', '').replace(',', '')
+                        try:
+                            current_pnl = float(val_str)
+                        except ValueError:
+                            current_pnl = 0.0
+                        
+                        # Heuristic: If PnL is non-zero, it's likely the valid close. 
+                        # If 0.0, it might be the opening trade (stale) or a breakeven close.
+                        # We verify by checking if we found a likely candidate.
+                        
+                        final_pnl = current_pnl
+                        
+                        if 'closeLevel' in latest_tx:
+                            final_exit_price = float(latest_tx['closeLevel'])
+                        elif 'level' in latest_tx: # Fallback
+                             final_exit_price = float(latest_tx['level'])
+
+                        logger.info(f"History Fetch Attempt {attempt+1}: Found PnL={final_pnl}, Exit={final_exit_price}")
+
+                        # If we found a non-zero PnL, we are confident it's the close.
+                        if final_pnl != 0.0:
+                            break
+                        
+                        # If PnL is 0.0, we continue retrying to see if a 'better' record appears,
+                        # unless it's the last attempt, in which case we accept 0.0 (Breakeven).
+                        
+                except Exception as e:
+                    logger.warning(f"History fetch attempt {attempt+1} failed for {deal_id}: {e}")
 
             # Update the main trade log with the outcome
             self._update_db(deal_id, final_exit_price, final_pnl, datetime.now().isoformat(), final_status)

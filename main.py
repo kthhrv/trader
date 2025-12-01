@@ -15,6 +15,8 @@ from src.news_fetcher import NewsFetcher
 from src.database import fetch_trade_data, save_post_mortem, fetch_recent_trades
 from src.gemini_analyst import GeminiAnalyst, TradingSignal, Action, EntryType # Added imports
 from src.ig_client import IGClient
+from src.trade_monitor_db import TradeMonitorDB
+from src.stream_manager import StreamManager
 
 # Configure Logging
 logging.basicConfig(
@@ -282,6 +284,78 @@ def run_recent_trades(limit: int):
         print(f"{'-'*80}")
     print("\n")
 
+def run_monitor_trade(deal_id: str):
+    """
+    Starts the 'Monitor & Manage' process for a specific active deal.
+    """
+    logger.info(f"--- STARTING MONITORING for Deal ID: {deal_id} ---")
+    client = IGClient()
+    
+    # 1. Fetch Open Position
+    position = client.fetch_open_position_by_deal_id(deal_id)
+    if not position:
+        logger.error(f"Could not find open position for Deal ID: {deal_id}. It might be closed.")
+        return
+
+    # Extract details (assuming flat dict from IGClient)
+    epic = position.get('epic')
+    direction = position.get('direction')
+    entry_price = position.get('level')
+    if entry_price is not None:
+        entry_price = float(entry_price)
+    
+    stop_level = position.get('stopLevel')
+    if stop_level is not None:
+        stop_level = float(stop_level)
+    else:
+        logger.warning(f"Deal {deal_id} has no Stop Level. Monitoring might be limited.")
+        stop_level = 0.0
+
+    logger.info(f"Found Position: {epic} ({direction}) @ {entry_price}, Stop: {stop_level}")
+
+    # 2. Calculate ATR for dynamic trailing
+    atr = None
+    try:
+        # Fetch 15-minute data for ATR calculation
+        logger.info(f"Calculating ATR for {epic}...")
+        df_15m = client.fetch_historical_data(epic, "15Min", 50)
+        if not df_15m.empty and len(df_15m) >= 14:
+            df_15m['ATR'] = ta.atr(df_15m['high'], df_15m['low'], df_15m['close'], length=14)
+            if 'ATR' in df_15m.columns and not df_15m['ATR'].isnull().all():
+                atr = float(df_15m['ATR'].iloc[-1])
+                logger.info(f"Calculated ATR (14, 15m): {atr:.2f}")
+    except Exception as e:
+        logger.warning(f"Could not calculate ATR: {e}")
+
+    # 3. Setup Stream & Monitor
+    stream_manager = StreamManager(client)
+    
+    try:
+        # Start stream (ensure connection and subscription to epic)
+        # We pass a no-op callback because TradeMonitorDB handles trade updates separately
+        # and doesn't strictly rely on price ticks in its loop.
+        logger.info(f"Connecting to stream for {epic}...")
+        stream_manager.connect_and_subscribe(epic, lambda x: None) 
+        
+        monitor = TradeMonitorDB(client, stream_manager)
+        
+        # Start blocking monitor loop
+        monitor.monitor_trade(
+            deal_id=deal_id,
+            epic=epic,
+            entry_price=entry_price,
+            stop_loss=stop_level,
+            atr=atr,
+            use_trailing_stop=True 
+        )
+    except KeyboardInterrupt:
+        logger.info("Monitoring interrupted by user.")
+    except Exception as e:
+        logger.error(f"Monitoring failed: {e}")
+    finally:
+        stream_manager.stop()
+
+
 def run_strategy(epic: str, strategy_name: str, news_query: str = None, dry_run: bool = False, verbose: bool = False, timeout_seconds: int = 5400, max_spread: float = 2.0):
     """
     Generic driver for a trading strategy on a specific epic.
@@ -323,6 +397,7 @@ def main():
     parser.add_argument("--dry-run", action="store_true", help="Execute strategy without placing actual orders (used with --now)")
     parser.add_argument("--news-only", action="store_true", help="Only fetch and print news for the selected market/query then exit")
     parser.add_argument("--post-mortem", type=str, help="Run post-mortem analysis on a specific deal ID.")
+    parser.add_argument("--monitor-trade", type=str, help="Start 'Monitor & Manage' process for a specific active Deal ID.")
     parser.add_argument("--recent-trades", type=int, nargs="?", const=5, help="Print N recent trades. Defaults to 5 if no number provided.")
     parser.add_argument("--volatility-check", action="store_true", help="Check current market volatility (Range/ATR) for the selected market/epic.")
     parser.add_argument("--test-trade", action="store_true", help="Execute an immediate test trade (BUY/SELL) with minimal size/stops. Requires --epic or --market.")
@@ -364,6 +439,10 @@ def main():
 
     if args.post_mortem:
         run_post_mortem(args.post_mortem)
+        return
+
+    if args.monitor_trade:
+        run_monitor_trade(args.monitor_trade)
         return
 
     if args.recent_trades is not None:

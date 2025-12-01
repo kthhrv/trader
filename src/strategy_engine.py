@@ -461,15 +461,22 @@ class StrategyEngine:
                 logger.warning("ATR not available in plan for stop tightness check.")
             # --- End Stop vs. ATR Check ---
 
-            # --- Dynamic Sizing ---
-            size = self._calculate_size(plan.entry, plan.stop_loss)
-            # Ensure min size (safeguard, though IG API will reject if too small, usually 0.5 or 0.04)
-            if size < 0.04:
-                 logger.warning(f"Calculated size {size} is below minimum (0.04). Setting to 0.04.")
-                 size = 0.04
-            # Log the final calculated size
-            logger.info(f"Final calculated trade size for {self.epic}: {size}")
-            # --- End Dynamic Sizing ---
+            # --- Sizing Logic ---
+            if self.strategy_name == "TEST_TRADE":
+                # For manual test trades, use the fixed size from the plan (e.g. 0.5)
+                # This ensures consistency and ignores account balance fluctuations.
+                size = plan.size
+                logger.info(f"TEST_TRADE: Using fixed size from plan: {size}")
+            else:
+                # Dynamic Sizing for Strategy Execution
+                size = self._calculate_size(plan.entry, plan.stop_loss)
+                # Ensure min size (safeguard, though IG API will reject if too small, usually 0.5 or 0.04)
+                if size < 0.04:
+                     logger.warning(f"Calculated size {size} is below minimum (0.04). Setting to 0.04.")
+                     size = 0.04
+                # Log the final calculated size
+                logger.info(f"Final calculated trade size for {self.epic}: {size}")
+            # --- End Sizing Logic ---
 
             if dry_run:
                 logger.info(f"DRY RUN: Order would have been PLACED for {direction} {size} {self.epic} at entry {plan.entry} (Stop: {plan.stop_loss}, TP: {plan.take_profit}). Spread: {current_spread}.")
