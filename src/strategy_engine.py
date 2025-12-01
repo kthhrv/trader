@@ -87,6 +87,18 @@ class StrategyEngine:
             latest = df.iloc[-1]
             prev_close = df.iloc[-2]['close']
             
+            # --- Volatility Context (New) ---
+            # Calculate average ATR of the loaded period (approx 50 candles)
+            avg_atr = df['ATR'].mean()
+            current_atr = latest['ATR']
+            vol_ratio = current_atr / avg_atr if avg_atr > 0 else 1.0
+            
+            vol_state = "MEDIUM"
+            if vol_ratio < 0.8:
+                vol_state = "LOW (Caution: Market may be choppy/ranging)"
+            elif vol_ratio > 1.2:
+                vol_state = "HIGH (Caution: Expect wider swings)"
+            
             # Calculate Gap (Current Open vs Previous Close)
             gap_percent = ((latest['open'] - prev_close) / prev_close) * 100
             gap_str = f"{gap_percent:+.2f}%"
@@ -98,7 +110,9 @@ class StrategyEngine:
             
             market_context += "\n\n--- Technical Indicators (Latest Candle) ---\n"
             market_context += f"RSI (14): {latest['RSI']:.2f}\n"
-            market_context += f"ATR (14): {latest['ATR']:.2f}\n"
+            market_context += f"ATR (14): {current_atr:.2f}\n"
+            market_context += f"Avg ATR (Last 50): {avg_atr:.2f}\n"
+            market_context += f"Volatility Regime: {vol_state} (Current/Avg Ratio: {vol_ratio:.2f})\n"
             market_context += f"EMA (20): {latest['EMA_20']:.2f}\n"
             market_context += f"Current Close: {latest['close']}\n"
             market_context += f"Gap (Open vs Prev Close): {gap_str}\n"
