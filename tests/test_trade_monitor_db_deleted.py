@@ -12,8 +12,9 @@ class TestTradeMonitorDBDeleted(unittest.TestCase):
         self.mock_stream_manager = MagicMock() 
         self.monitor = TradeMonitorDB(self.mock_client, self.mock_stream_manager)
 
+    @patch('src.trade_monitor_db.time.sleep') # Patch sleep to skip retry delays
     @patch('src.trade_monitor_db.update_trade_outcome')
-    def test_monitor_trade_deleted_status(self, mock_update_db):
+    def test_monitor_trade_deleted_status(self, mock_update_db, mock_sleep):
         """
         Test that receiving a 'DELETED' status update correctly signals trade closure.
         """
