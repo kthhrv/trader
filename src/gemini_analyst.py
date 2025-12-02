@@ -76,7 +76,7 @@ class GeminiAnalyst:
                *   **Market Overview:** Summarize the current trend, volatility (ATR), and momentum (RSI).
                *   **Key Levels:** Identify significant support and resistance levels from the OHLC data.
                *   **News Sentiment:** Evaluate the overall sentiment from the provided news headlines (Positive, Negative, Neutral).
-               *   **Trade Rationale:** Based on the above, explain WHY a BUY/SELL/WAIT signal is generated. Justify entry, stop loss, take profit, trade size, and why the **ATR-based stop** is appropriate. Explicitly justify the choice of 'INSTANT' vs 'CONFIRMATION' entry AND 'use_trailing_stop'.
+               *   **Trade Rationale:** Based on the above, explain WHY a BUY/SELL/WAIT signal is generated. Justify entry, stop loss, take profit, trade size, and why the **ATR-based stop** is appropriate. Explicitly justify the choice of 'INSTANT' vs 'CONFIRMATION' entry AND 'use_trailing_stop'. Ensure Stop Loss is NOT placed *within* the range of the opening 5-minute candle; instead, aim for structural lows (e.g., below the 08:00 low for a BUY).
                *   **Risk/Reward:** Briefly state the estimated risk/reward for the proposed trade.
             6. After the Chain-of-Thought, your final output MUST be strictly in the requested JSON format, and ONLY the JSON. Ensure the 'atr' field reflects the current ATR value provided in the market context.
             """
@@ -120,13 +120,22 @@ class GeminiAnalyst:
         log = trade_data.get('log', {})
         monitor = trade_data.get('monitor', [])
         
-        # Summarize monitoring data
-        start_price = monitor[0]['bid'] if monitor else "N/A"
-        end_price = monitor[-1]['bid'] if monitor else "N/A"
-        min_pnl = min((row['pnl'] for row in monitor), default=0)
-        max_pnl = max((row['pnl'] for row in monitor), default=0)
-        final_pnl = monitor[-1]['pnl'] if monitor else "N/A"
-        
+        # Summarize monitoring data with fallbacks from log
+        if monitor:
+            start_price = monitor[0]['bid']
+            end_price = monitor[-1]['bid']
+            min_pnl = min((row['pnl'] for row in monitor), default=0)
+            max_pnl = max((row['pnl'] for row in monitor), default=0)
+            final_pnl = monitor[-1]['pnl']
+        else:
+            # Fallback to trade_log data if monitoring data is missing
+            start_price = log.get('entry', "N/A")
+            end_price = log.get('exit_price', "N/A")
+            final_pnl = log.get('pnl', "N/A")
+            # We can't know min/max pnl range without tick data, so we imply it from final
+            min_pnl = final_pnl if isinstance(final_pnl, (int, float)) and final_pnl < 0 else 0
+            max_pnl = final_pnl if isinstance(final_pnl, (int, float)) and final_pnl > 0 else 0
+
         price_history_context = ""
         if price_history_df is not None and not price_history_df.empty:
             # Create a simplified string representation of the candle data
