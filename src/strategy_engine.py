@@ -104,8 +104,13 @@ class StrategyEngine:
             elif vol_ratio > 1.2:
                 vol_state = "HIGH (Caution: Expect wider swings)"
             
-            # Calculate Gap (Current Open vs Previous Close)
-            gap_percent = ((latest['open'] - prev_close) / prev_close) * 100
+            # Calculate Gap (Current Price vs Yesterday's Close)
+            yesterday_close = prev_close # Default fallback to previous 15m close
+            if not df_daily.empty and len(df_daily) >= 2:
+                 # Assuming last row is 'Today' (forming) and second to last is 'Yesterday' (Confirmed)
+                 yesterday_close = df_daily.iloc[-2]['close']
+
+            gap_percent = ((latest['close'] - yesterday_close) / yesterday_close) * 100
             gap_str = f"{gap_percent:+.2f}%"
 
             # 3. Format Data for Gemini
