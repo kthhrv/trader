@@ -66,6 +66,11 @@ class StrategyEngine:
             # 1. Fetch Historical Data (Fetch 50 points to allow for indicator calculation)
             df = self.client.fetch_historical_data(self.epic, "15Min", 50)
             
+            # Fetch Daily Data for macro trend context
+            df_daily = self.client.fetch_historical_data(self.epic, "D", 10)
+            if df_daily.empty:
+                logger.warning("No daily data received from IG. Proceeding with 15Min data only.")
+            
             if df.empty:
                 logger.error("No data received from IG.")
                 return
@@ -105,8 +110,14 @@ class StrategyEngine:
 
             # 3. Format Data for Gemini
             market_context = f"Instrument: {self.epic}\n"
-            market_context += "Recent OHLC Data (Last 4 Hours, 15m intervals):\n"
-            market_context += df.tail(16).to_string()
+            
+            if not df_daily.empty:
+                market_context += "\n--- Daily OHLC Data (Last 10 Days) ---\n"
+                market_context += df_daily.to_string()
+                market_context += "\n"
+
+            market_context += "Recent OHLC Data (Last 12 Hours, 15m intervals):\n"
+            market_context += df.to_string()
             
             market_context += "\n\n--- Technical Indicators (Latest Candle) ---\n"
             market_context += f"RSI (14): {latest['RSI']:.2f}\n"
