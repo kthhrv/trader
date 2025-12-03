@@ -84,7 +84,7 @@ def test_generate_plan_success(mock_components):
     engine.generate_plan()
     
     assert engine.active_plan == mock_signal
-    mock_client.fetch_historical_data.assert_called_once()
+    assert mock_client.fetch_historical_data.call_count == 2
     mock_analyst.analyze_market.assert_called_once()
 
 def test_generate_plan_wait(mock_components, caplog):
@@ -115,7 +115,7 @@ def test_generate_plan_wait(mock_components, caplog):
 
     # Verify that no active plan is set
     assert engine.active_plan is None
-    mock_client.fetch_historical_data.assert_called_once()
+    assert mock_client.fetch_historical_data.call_count == 2
     mock_analyst.analyze_market.assert_called_once()
     
     # Verify that the correct message was logged
