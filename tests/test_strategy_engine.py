@@ -242,7 +242,13 @@ def test_poll_market_no_trigger(mock_components):
     )
     assert engine.position_open is False
     mock_client.place_spread_bet_order.assert_not_called()
-    mock_trade_logger.log_trade.assert_not_called()
+    
+    # Verify that the trade was logged as TIMED_OUT
+    mock_trade_logger.log_trade.assert_called_once()
+    args, kwargs = mock_trade_logger.log_trade.call_args
+    assert kwargs['outcome'] == "TIMED_OUT"
+    assert kwargs['deal_id'].startswith("TIMEOUT_")
+
     mock_trade_monitor.monitor_trade.assert_not_called()
     mock_stream_manager.stop.assert_called_once()
 
@@ -298,7 +304,12 @@ def test_place_market_order_spread_too_wide(mock_components, caplog):
         # Verify a warning was logged
         assert "SKIPPED: Spread (10.0) is wider than max allowed (1.0)" in caplog.text
         
-        mock_trade_logger.log_trade.assert_not_called()
+        # Verify that the trade was logged as TIMED_OUT
+        mock_trade_logger.log_trade.assert_called_once()
+        args, kwargs = mock_trade_logger.log_trade.call_args
+        assert kwargs['outcome'] == "TIMED_OUT"
+        assert kwargs['deal_id'].startswith("TIMEOUT_")
+        
         mock_trade_monitor.monitor_trade.assert_not_called()
         mock_stream_manager.stop.assert_called_once()
 def test_place_market_order_stop_too_tight(mock_components, caplog):

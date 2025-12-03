@@ -101,11 +101,11 @@ def update_trade_outcome(deal_id: str, exit_price: float, pnl: float, exit_time:
     finally:
         conn.close()
 
-def save_post_mortem(deal_id: str, analysis: str):
+def save_post_mortem(deal_id: str, analysis: str, db_path=None):
     """
     Saves the post-mortem analysis to the trade_log table.
     """
-    conn = get_db_connection()
+    conn = get_db_connection(db_path)
     cursor = conn.cursor()
     try:
         cursor.execute("UPDATE trade_log SET post_mortem = ? WHERE deal_id = ?", (analysis, deal_id))

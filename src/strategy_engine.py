@@ -1,5 +1,6 @@
 import logging
 import time
+import uuid
 from typing import Optional
 from datetime import datetime
 import pandas as pd
@@ -270,6 +271,20 @@ class StrategyEngine:
             while not self.position_open:
                 if (time.time() - start_time) > timeout_seconds:
                     logger.info(f"Strategy for {self.epic} timed out after {timeout_seconds}s. No trade executed.")
+                    
+                    # Generate a synthetic deal_id for post-mortem analysis
+                    synthetic_deal_id = f"TIMEOUT_{uuid.uuid4().hex[:8]}"
+                    
+                    # Log the timeout event to DB
+                    self.trade_logger.log_trade(
+                        epic=self.epic,
+                        plan=self.active_plan,
+                        outcome="TIMED_OUT",
+                        spread_at_entry=0.0,
+                        is_dry_run=self.dry_run,
+                        deal_id=synthetic_deal_id
+                    )
+                    
                     break # Exit loop on timeout
                 
                 # Sleep for a short duration to prevent busy-spinning and reduce CPU usage.

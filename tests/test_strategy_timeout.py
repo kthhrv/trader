@@ -1,0 +1,71 @@
+import unittest
+from unittest.mock import MagicMock, patch
+import time
+import os
+import uuid
+
+from src.strategy_engine import StrategyEngine
+from src.gemini_analyst import TradingSignal, Action, EntryType
+from src.database import init_db, get_db_connection, save_post_mortem, fetch_trade_data
+from src.trade_logger_db import TradeLoggerDB
+
+class TestStrategyTimeout(unittest.TestCase):
+    def setUp(self):
+        self.test_db_path = f"/home/keith/.gemini/tmp/{uuid.uuid4().hex}.db"
+        init_db(self.test_db_path)
+        self.mock_ig_client = MagicMock()
+        self.mock_analyst = MagicMock()
+        self.trade_logger = TradeLoggerDB(db_path=self.test_db_path)
+        self.mock_stream_manager = MagicMock()
+        
+        self.engine = StrategyEngine(
+            epic="CS.D.GBPUSD.TODAY.IP",
+            ig_client=self.mock_ig_client,
+            analyst=self.mock_analyst,
+            trade_logger=self.trade_logger,
+            stream_manager=self.mock_stream_manager
+        )
+        
+        # Set up a dummy active plan
+        self.engine.active_plan = TradingSignal(
+            ticker="GBPUSD",
+            action=Action.BUY,
+            entry=1.3000,
+            stop_loss=1.2900,
+            take_profit=1.3200,
+            size=0.5,
+            atr=0.0010,
+            use_trailing_stop=False,
+            confidence="high",
+            reasoning="Test",
+            entry_type=EntryType.INSTANT
+        )
+
+    def tearDown(self):
+        os.remove(self.test_db_path)
+
+    def test_timeout_and_post_mortem_logging(self):
+        # Run execution with a very short timeout
+        self.engine.execute_strategy(timeout_seconds=0.01)
+        
+        # Verify trade was logged as TIMED_OUT
+        conn = get_db_connection(self.test_db_path)
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM trade_log WHERE outcome = ?", ("TIMED_OUT",))
+        timed_out_trade = cursor.fetchone()
+        conn.close()
+
+        self.assertIsNotNone(timed_out_trade)
+        self.assertEqual(timed_out_trade['outcome'], "TIMED_OUT")
+        synthetic_deal_id = timed_out_trade['deal_id']
+        self.assertTrue(synthetic_deal_id.startswith("TIMEOUT_"))
+        self.assertEqual(timed_out_trade['spread_at_entry'], 0.0)
+
+        # Test post-mortem functionality
+        post_mortem_analysis = "This trade timed out due to lack of market momentum at open."
+        save_post_mortem(synthetic_deal_id, post_mortem_analysis, db_path=self.test_db_path)
+
+        # Fetch the trade again and verify post-mortem is saved
+        updated_trade = fetch_trade_data(synthetic_deal_id, db_path=self.test_db_path)
+        self.assertIsNotNone(updated_trade)
+        self.assertEqual(updated_trade['log']['post_mortem'], post_mortem_analysis)
