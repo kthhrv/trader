@@ -509,8 +509,14 @@ class StrategyEngine:
                 logger.info(f"Final calculated trade size for {self.epic}: {size}")
             # --- End Sizing Logic ---
 
+            # --- Take Profit Override for Trailing Stop ---
+            take_profit_level = plan.take_profit
+            if plan.use_trailing_stop:
+                logger.info("Using Trailing Stop strategy. Overriding Take Profit to None for uncapped upside.")
+                take_profit_level = None
+
             if dry_run:
-                logger.info(f"DRY RUN: Order would have been PLACED for {direction} {size} {self.epic} at entry {plan.entry} (Stop: {plan.stop_loss}, TP: {plan.take_profit}). Spread: {current_spread}.")
+                logger.info(f"DRY RUN: Order would have been PLACED for {direction} {size} {self.epic} at entry {plan.entry} (Stop: {plan.stop_loss}, TP: {take_profit_level}). Spread: {current_spread}.")
                 outcome = "DRY_RUN_PLACED"
             else:
                 logger.info("Placing LIVE MARKET order...")
@@ -521,7 +527,7 @@ class StrategyEngine:
                     size=size,
                     level=plan.entry, 
                     stop_level=plan.stop_loss,
-                    limit_level=plan.take_profit
+                    limit_level=take_profit_level
                 )
                 logger.info("LIVE Market Order successfully placed.")
                 outcome = "LIVE_PLACED"

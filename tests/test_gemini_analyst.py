@@ -2,6 +2,7 @@ import pytest
 from unittest.mock import MagicMock, patch
 import json
 from src.gemini_analyst import GeminiAnalyst, TradingSignal, Action, EntryType
+import typing_extensions as typing
 
 # Mock response class to simulate Gemini's return object
 class MockGeminiResponse:
@@ -109,3 +110,34 @@ def test_analyze_market_failure_handles_exception(mock_genai):
     
     # Verify
     assert result is None
+
+def test_analyze_market_optional_tp(mock_genai):
+    # Setup
+    mock_model = MagicMock()
+    mock_genai.GenerativeModel.return_value = mock_model
+    
+    # Define expected JSON response from Gemini with null take_profit
+    expected_response = {
+        "ticker": "FTSE100",
+        "action": "BUY",
+        "entry": 7510.0,
+        "entry_type": "INSTANT",
+        "stop_loss": 7490.0,
+        "take_profit": None, # Key check
+        "size": 1.0, 
+        "atr": 15.0,
+        "confidence": "high",
+        "use_trailing_stop": True,
+        "reasoning": "Breakout above resistance with strong volume, using trailing stop."
+    }
+    
+    mock_model.generate_content.return_value = MockGeminiResponse(json.dumps(expected_response))    
+    # Execute
+    analyst = GeminiAnalyst()
+    result = analyst.analyze_market("Some market context", strategy_name="Test Strategy")
+    
+    # Verify
+    assert isinstance(result, TradingSignal)
+    assert result.action == Action.BUY
+    assert result.take_profit is None
+    assert result.use_trailing_stop is True
