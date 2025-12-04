@@ -282,7 +282,8 @@ class StrategyEngine:
                         outcome="TIMED_OUT",
                         spread_at_entry=0.0,
                         is_dry_run=self.dry_run,
-                        deal_id=synthetic_deal_id
+                        deal_id=synthetic_deal_id,
+                        entry_type=self.active_plan.entry_type.value if self.active_plan.entry_type else "UNKNOWN"
                     )
                     
                     break # Exit loop on timeout
@@ -546,7 +547,8 @@ class StrategyEngine:
                 outcome=outcome,
                 spread_at_entry=current_spread,
                 is_dry_run=dry_run,
-                deal_id=deal_id
+                deal_id=deal_id,
+                entry_type=plan.entry_type.value if plan.entry_type else "UNKNOWN"
             )
 
             # Start Monitoring (Update upon close) - Blocking call

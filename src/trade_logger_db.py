@@ -16,7 +16,8 @@ class TradeLoggerDB:
                    outcome: str,
                    spread_at_entry: float,
                    is_dry_run: bool,
-                   deal_id: str = None):
+                   deal_id: str = None,
+                   entry_type: str = "UNKNOWN"):
         """
         Logs the details of a trade to the SQLite database.
         """
@@ -28,14 +29,15 @@ class TradeLoggerDB:
             
             cursor.execute('''
                 INSERT INTO trade_log (
-                    timestamp, epic, action, entry, stop_loss, take_profit,
+                    timestamp, epic, action, entry_type, entry, stop_loss, take_profit,
                     size, outcome, reasoning, confidence, spread_at_entry,
-                    atr, is_dry_run, deal_id
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    atr, is_dry_run, deal_id, use_trailing_stop
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 timestamp,
                 epic,
                 plan.action.value if isinstance(plan.action, Action) else str(plan.action),
+                entry_type,
                 plan.entry,
                 plan.stop_loss,
                 plan.take_profit,
@@ -46,7 +48,8 @@ class TradeLoggerDB:
                 spread_at_entry,
                 plan.atr,
                 is_dry_run,
-                deal_id
+                deal_id,
+                plan.use_trailing_stop
             ))
             
             conn.commit()

@@ -188,6 +188,7 @@ def test_e2e_trading_flow(e2e_mocks, caplog):
     assert logged_trade_entry['epic'] == epic
     assert logged_trade_entry['outcome'] == "LIVE_PLACED"
     assert logged_trade_entry['deal_id'] == "MOCK_DEAL_ID"
+    assert logged_trade_entry['entry_type'] == engine.active_plan.entry_type.value
     
     # Verify stream manager was stopped
     mock_stream_manager.stop.assert_called_once()

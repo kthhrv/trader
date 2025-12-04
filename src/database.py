@@ -38,6 +38,7 @@ def init_db(db_path=None):
             timestamp TEXT,
             epic TEXT,
             action TEXT,
+            entry_type TEXT,
             entry REAL,
             stop_loss REAL,
             take_profit REAL,
@@ -52,10 +53,31 @@ def init_db(db_path=None):
             exit_price REAL,
             pnl REAL,
             exit_time TEXT,
-            post_mortem TEXT
+            post_mortem TEXT,
+            use_trailing_stop BOOLEAN
         )
     ''')
     
+    # Check if 'entry_type' column exists (for migration)
+    cursor.execute("PRAGMA table_info(trade_log)")
+    columns = [info[1] for info in cursor.fetchall()]
+    
+    if 'entry_type' not in columns:
+        logger.info("Migrating database: Adding 'entry_type' column to 'trade_log'...")
+        try:
+            cursor.execute("ALTER TABLE trade_log ADD COLUMN entry_type TEXT")
+            logger.info("Migration successful.")
+        except Exception as e:
+            logger.error(f"Migration failed: {e}")
+
+    if 'use_trailing_stop' not in columns:
+        logger.info("Migrating database: Adding 'use_trailing_stop' column to 'trade_log'...")
+        try:
+            cursor.execute("ALTER TABLE trade_log ADD COLUMN use_trailing_stop BOOLEAN")
+            logger.info("Migration successful.")
+        except Exception as e:
+            logger.error(f"Migration failed: {e}")
+
     conn.commit()
     conn.close()
     logger.info(f"Database initialized at {db_path if db_path else DB_PATH}")

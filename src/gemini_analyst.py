@@ -33,7 +33,7 @@ class TradingSignal(BaseModel):
 
     stop_loss: float = Field(description="The stop loss price level.")
 
-    take_profit: typing.Optional[float] = Field(None, description="The take profit price level. Can be null if using a trailing stop for uncapped wins.")
+    take_profit: typing.Optional[float] = Field(description="The take profit price level. Can be null if using a trailing stop for uncapped wins.")
 
     size: float = Field(description="The suggested trade size per point.")
 

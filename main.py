@@ -264,6 +264,10 @@ def run_recent_trades(limit: int):
         pnl = trade.get('pnl')
         pnl_str = f"£{pnl:.2f}" if pnl is not None else "N/A"
         
+        # Determine Plan Type
+        is_uncapped = trade.get('use_trailing_stop') or (trade.get('take_profit') is None)
+        plan_type = "Uncapped Trailing" if is_uncapped else f"Target: {trade.get('take_profit')}"
+
         # Simple color for PnL (Green/Red/Reset)
         color = ""
         reset = ""
@@ -274,13 +278,15 @@ def run_recent_trades(limit: int):
                 color = "\033[91m" # Red
             reset = "\033[0m"
 
-        print(f"Deal ID:   {trade['deal_id']}")
-        print(f"Time:      {entry_time_str} -> {exit_time_str or 'Active'}")
-        print(f"Epic:      {trade['epic']} ({trade['action']})")
-        print(f"Entry:     {trade['entry']} | Exit: {trade.get('exit_price') or 'N/A'}")
-        print(f"Result:    {color}{pnl_str}{reset} ({trade['outcome']})")
-        print(f"Duration:  {duration_str}")
-        print(f"Reasoning: {trade['reasoning'][:100]}...") 
+        print(f"Deal ID:    {trade['deal_id']}")
+        print(f"Time:       {entry_time_str} -> {exit_time_str or 'Active'}")
+        print(f"Epic:       {trade['epic']} ({trade['action']})")
+        print(f"Entry Type: {trade['entry_type']}")
+        print(f"TP:         {plan_type}")
+        print(f"Entry:      {trade['entry']} | Exit: {trade.get('exit_price') or 'N/A'}")
+        print(f"Result:     {color}{pnl_str}{reset} ({trade['outcome']})")
+        print(f"Duration:   {duration_str}")
+        print(f"Reasoning:  {trade['reasoning'][:100]}...") 
         print(f"{'-'*80}")
     print("\n")
 

@@ -31,15 +31,16 @@ class TestTradeLoggerDB(unittest.TestCase):
             use_trailing_stop=True
         )
         
-        logger.log_trade("TEST", plan, "SUCCESS", 1.5, False, "DEAL123")
+        logger.log_trade("TEST", plan, "SUCCESS", 1.5, False, "DEAL123", entry_type=plan.entry_type.value)
         
         mock_cursor.execute.assert_called_once()
         args = mock_cursor.execute.call_args[0]
         self.assertIn("INSERT INTO trade_log", args[0])
         params = args[1]
         self.assertEqual(params[1], "TEST") # epic
-        self.assertEqual(params[11], 5.0) # atr
-        self.assertEqual(params[13], "DEAL123") # deal_id
+        self.assertEqual(params[3], "INSTANT") # entry_type
+        self.assertEqual(params[12], 5.0) # atr (shifted)
+        self.assertEqual(params[14], "DEAL123") # deal_id (shifted)
         
         mock_conn.commit.assert_called_once()
         mock_conn.close.assert_called_once()
