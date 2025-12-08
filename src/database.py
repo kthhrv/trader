@@ -5,7 +5,9 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-DB_PATH = "data/trader.db"
+# Make DB_PATH absolute and relative to the project root
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+DB_PATH = str(PROJECT_ROOT / "data" / "trader.db")
 
 def get_db_connection(db_path=None):
     """

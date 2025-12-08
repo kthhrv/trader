@@ -78,3 +78,13 @@ class MarketStatus:
         else:
             # logger.info(f"Market {country_code} is OPEN today ({current_date}).") # Too verbose for regular logging
             return False
+
+    def get_market_status(self, epic: str) -> str:
+        """
+        Returns a string indicating the market status (OPEN or CLOSED).
+        This version relies only on holiday checks, not live market hours.
+        """
+        if self.is_holiday(epic):
+            return "CLOSED (Holiday)"
+        # In a real scenario, this would check specific market hours based on epic
+        return "OPEN"

@@ -15,8 +15,10 @@ dependencies = [
     "pytest>=9.0.1",
     "pytest-cov>=7.0.0",
     "python-dotenv>=1.2.1",
+    "reflex>=0.6.4",
     "tenacity>=9.1.2",
     "trading-ig>=0.0.22",
+    "yfinance>=0.2.66",
 ]
 
 [dependency-groups]
