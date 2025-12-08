@@ -18,3 +18,4 @@ trading_plan.json
 
 # db
 data/trader.db
+.env.live

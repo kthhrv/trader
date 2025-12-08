@@ -1,6 +1,8 @@
 import time
 import logging
 import pandas as pd
+from pathlib import Path
+from dotenv import dotenv_values
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from trading_ig import IGService
 from trading_ig.rest import IGException
@@ -13,8 +15,15 @@ class IGClient:
     def __init__(self):
         """
         Initializes the IG Client.
-        Uses config.IS_LIVE to toggle between DEMO and LIVE environments.
+        Uses config.IS_LIVE to toggle between DEMO and LIVE environments for TRADING.
+        
+        Advanced Feature:
+        If running in DEMO mode (IS_LIVE=False), it checks for a .env.live file.
+        If found, it initializes a SECONDARY 'data_service' using those LIVE credentials
+        strictly for fetching historical data (bypassing Demo limits), while keeping
+        trading on the DEMO account.
         """
+        # 1. Primary Service (Trading)
         self.service = IGService(
             IG_USERNAME,
             IG_PASSWORD,
@@ -22,63 +31,117 @@ class IGClient:
             "LIVE" if IS_LIVE else "DEMO",
             acc_number=IG_ACC_ID
         )
+        self._apply_timeout_patch(self.service)
         
-        # Enforce default timeout on the session to prevent hangs
-        # This monkey-patches the session object used by trading_ig
-        original_request = self.service.session.request
-        def timeout_request(*args, **kwargs):
-            if 'timeout' not in kwargs:
-                kwargs['timeout'] = 10 # Default 10s timeout
-            return original_request(*args, **kwargs)
-        self.service.session.request = timeout_request
+        # 2. Secondary Service (Data) - Default to primary
+        self.data_service = self.service 
+        self.live_data_config = None
+        
+        # Check for Live Data Override if we are in Demo mode
+        if not IS_LIVE:
+            env_live_path = Path(".env.live")
+            if env_live_path.exists():
+                logger.info("Detected .env.live - Attempting to configure Live Data Feed for Demo Bot...")
+                config_live = dotenv_values(env_live_path)
+                
+                # Check if it's actually enabled/live
+                if config_live.get("IS_LIVE", "false").lower() == "true":
+                    try:
+                        self.data_service = IGService(
+                            config_live.get("IG_USERNAME"),
+                            config_live.get("IG_PASSWORD"),
+                            config_live.get("IG_API_KEY"),
+                            "LIVE",
+                            acc_number=config_live.get("IG_ACC_ID")
+                        )
+                        self._apply_timeout_patch(self.data_service)
+                        self.live_data_config = config_live
+                        logger.info("Hybrid Mode Enabled: TRADING on DEMO, DATA from LIVE.")
+                    except Exception as e:
+                        logger.error(f"Failed to initialize Live Data service: {e}. Reverting to Demo data.")
+                        self.data_service = self.service
         
         self.authenticated = False
-        
-    def authenticate(self):
+
+    def _apply_timeout_patch(self, service_obj):
+        """Enforces default timeout on the session."""
+        original_request = service_obj.session.request
+        def timeout_request(*args, **kwargs):
+            if 'timeout' not in kwargs:
+                kwargs['timeout'] = 10 
+            return original_request(*args, **kwargs)
+        service_obj.session.request = timeout_request
+
+    def _authenticate_service(self, service_obj, username, password, acc_id_target, env_label):
         """
-        Creates a session with IG and explicitly selects the configured account.
+        Helper to authenticate a specific service instance and set the account.
         """
         try:
-            # 1. Create a general session first
-            self.service.create_session()
+            # 1. Create Session
+            service_obj.create_session()
             
-            # 2. Fetch all available accounts
-            accounts_df = self.service.fetch_accounts()
+            # 2. Fetch Accounts
+            accounts_df = service_obj.fetch_accounts()
             
             if accounts_df.empty:
-                raise Exception("No trading accounts found for the provided credentials.")
+                raise Exception(f"No trading accounts found for {env_label}.")
 
             target_account = None
-            if IG_ACC_ID:
-                # Filter by IG_ACC_ID from config
-                filtered_accounts = accounts_df[accounts_df['accountId'] == IG_ACC_ID]
+            if acc_id_target:
+                # Filter by Account ID
+                filtered_accounts = accounts_df[accounts_df['accountId'] == acc_id_target]
                 if not filtered_accounts.empty:
                     target_account = filtered_accounts.iloc[0]
                 else:
-                    raise Exception(f"Configured IG_ACC_ID ({IG_ACC_ID}) not found among available accounts.")
+                    raise Exception(f"Configured Account ID ({acc_id_target}) not found in {env_label} accounts.")
             else:
-                # If no specific account ID is configured, use the preferred account
+                # Preference logic
                 preferred_accounts = accounts_df[accounts_df['preferred'] == True]
                 if not preferred_accounts.empty:
                     target_account = preferred_accounts.iloc[0]
                 elif not accounts_df.empty:
-                    # Fallback to the first account if no preferred and no specific ID
                     target_account = accounts_df.iloc[0]
                 else:
-                    raise Exception("No preferred account found and no specific IG_ACC_ID configured.")
+                    raise Exception(f"No preferred account found for {env_label}.")
 
-            if target_account is None:
-                raise Exception("Could not determine target trading account.")
+            # 3. Set Context
+            service_obj.account_id = target_account['accountId']
+            service_obj.account_type = target_account['accountType']
+            
+            logger.info(f"Authenticated {env_label} Service: {service_obj.account_id} ({service_obj.account_type})")
+            
+        except Exception as e:
+            logger.error(f"Authentication failed for {env_label}: {e}")
+            raise
 
-            # 3. Explicitly set the service's account context
-            self.service.account_id = target_account['accountId']
-            self.service.account_type = target_account['accountType']
+    def authenticate(self):
+        """
+        Authenticates the trading service (and data service if separate).
+        """
+        try:
+            # 1. Authenticate Trading Service
+            self._authenticate_service(
+                self.service, 
+                IG_USERNAME, 
+                IG_PASSWORD, 
+                IG_ACC_ID, 
+                "LIVE TRADING" if IS_LIVE else "DEMO TRADING"
+            )
+
+            # 2. Authenticate Data Service (if separate)
+            if self.data_service != self.service and self.live_data_config:
+                self._authenticate_service(
+                    self.data_service,
+                    self.live_data_config.get("IG_USERNAME"),
+                    self.live_data_config.get("IG_PASSWORD"),
+                    self.live_data_config.get("IG_ACC_ID"),
+                    "LIVE DATA"
+                )
             
             self.authenticated = True
-            logger.info(f"Successfully authenticated to IG ({'LIVE' if IS_LIVE else 'DEMO'}) with account: {self.service.account_id} ({self.service.account_type}).")
         except Exception as e:
-            logger.error(f"Authentication failed: {e}")
-            raise
+            self.authenticated = False
+            raise e
 
     @retry(
         stop=stop_after_attempt(1),
@@ -87,24 +150,16 @@ class IGClient:
     )
     def fetch_historical_data(self, epic: str, resolution: str, num_points: int) -> pd.DataFrame:
         """
-        Fetches historical OHLC data for a given epic.
-        
-        Args:
-            epic (str): The instrument identifier (e.g., 'CS.D.GBPUSD.TODAY.IP').
-            resolution (str): The chart resolution (e.g., 'M15', 'H1').
-            num_points (int): Number of data points to retrieve.
-            
-        Returns:
-            pd.DataFrame: A DataFrame with 'open', 'high', 'low', 'close', 'volume' columns.
+        Fetches historical OHLC data. Uses data_service (Live or Demo).
         """
         if not self.authenticated:
             self.authenticate()
 
         try:
-            response = self.service.fetch_historical_prices_by_epic_and_num_points(
+            # Use data_service here
+            response = self.data_service.fetch_historical_prices_by_epic_and_num_points(
                 epic, resolution, num_points
             )
-            # The library returns a DataFrame directly in 'prices' key
             df = response['prices']
             return self._process_historical_df(df)
         except Exception as e:
@@ -118,22 +173,14 @@ class IGClient:
     )
     def fetch_historical_data_by_range(self, epic: str, resolution: str, start_date: str, end_date: str) -> pd.DataFrame:
         """
-        Fetches historical OHLC data for a given epic within a specific date range.
-        
-        Args:
-            epic (str): Instrument epic.
-            resolution (str): Resolution string (e.g., '1Min', '15Min').
-            start_date (str): Start datetime (YYYY-MM-DD HH:MM:SS).
-            end_date (str): End datetime (YYYY-MM-DD HH:MM:SS).
-            
-        Returns:
-            pd.DataFrame: A DataFrame with 'open', 'high', 'low', 'close', 'volume' columns.
+        Fetches historical OHLC data by range. Uses data_service (Live or Demo).
         """
         if not self.authenticated:
             self.authenticate()
 
         try:
-            response = self.service.fetch_historical_prices_by_epic_and_date_range(
+            # Use data_service here
+            response = self.data_service.fetch_historical_prices_by_epic_and_date_range(
                 epic, resolution, start_date, end_date
             )
             df = response['prices']
@@ -143,12 +190,7 @@ class IGClient:
             raise
 
     def _process_historical_df(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Helper to process and standardize the historical prices DataFrame.
-        """
-        # Handle MultiIndex columns (trading_ig usually returns (price_type, ohlc))
         if isinstance(df.columns, pd.MultiIndex):
-            # Prefer 'bid' prices, fallback to 'last' or 'ask'
             if 'bid' in df.columns.get_level_values(0):
                 df = df['bid']
             elif 'last' in df.columns.get_level_values(0):
@@ -156,7 +198,6 @@ class IGClient:
             elif 'ask' in df.columns.get_level_values(0):
                 df = df['ask']
         
-        # Rename columns to standard lowercase for pandas_ta
         df.rename(columns={
             'Open': 'open',
             'High': 'high', 
@@ -164,32 +205,20 @@ class IGClient:
             'Close': 'close',
             'Volume': 'volume'
         }, inplace=True)
-        
         return df
 
     def place_spread_bet_order(self, epic: str, direction: str, size: float, stop_level: float, level: float = None, limit_level: float = None):
         """
-        Places a SPREAD BET order using direct REST API call to bypass wrapper limitations.
-        Strictly requires a stop_level for risk management.
-        
-        Args:
-            epic (str): Instrument epic.
-            direction (str): 'BUY' or 'SELL'.
-            size (float): Size per point.
-            stop_level (float): Absolute price for stop loss.
-            level (float, optional): Entry level (for Market order context, usually None or current price).
-            limit_level (float, optional): Absolute price for take profit.
+        Places a SPREAD BET order using self.service (TRADING service).
         """
         if not self.authenticated:
             self.authenticate()
 
-        # Basic validation
         if size <= 0:
             raise ValueError("Size must be positive.")
         
         currency_code = 'GBP' 
         
-        # Construct payload manually, omitting None values
         payload = {
             "epic": epic,
             "direction": direction,
@@ -202,24 +231,19 @@ class IGClient:
             "timeInForce": "FILL_OR_KILL"
         }
 
-        # Only add optional fields if they have values
         if stop_level is not None:
             payload["stopLevel"] = stop_level
-        
         if limit_level is not None:
             payload["limitLevel"] = limit_level
 
         try:
-            # Direct POST to V2 endpoint
-            # Determine base URL based on config
+            # Use self.service for Trading
             from config import IS_LIVE
             base_url = "https://api.ig.com/gateway/deal" if IS_LIVE else "https://demo-api.ig.com/gateway/deal"
             endpoint = "/positions/otc"
             url = f"{base_url}{endpoint}"
             
-            # Headers are managed by the session, but we ensure version 2
             headers = {"Version": "2"}
-            
             logger.info(f"Sending Order Payload: {payload}")
             
             response = self.service.session.post(url, json=payload, headers=headers)
@@ -232,7 +256,6 @@ class IGClient:
             deal_ref = response_data['dealReference']
             logger.info(f"Order Submitted. Deal Ref: {deal_ref}")
 
-            # Check confirmation
             confirmation = self.service.fetch_deal_by_deal_reference(deal_ref)
             
             if confirmation['dealStatus'] == 'ACCEPTED':
@@ -248,20 +271,16 @@ class IGClient:
             raise
 
     def update_open_position(self, deal_id: str, stop_level: float = None, limit_level: float = None):
-        """
-        Updates an existing open position (e.g. moves stop loss or take profit).
-        """
         if not self.authenticated:
             self.authenticate()
 
         try:
+            # Use self.service
             response = self.service.edit_open_position(
                 deal_id=deal_id,
                 stop_level=stop_level,
                 limit_level=limit_level
             )
-            
-            # Check confirmation if available, or just return response
             logger.info(f"Updated position {deal_id}: Stop={stop_level}, Limit={limit_level}. Response: {response}")
             return response
 
@@ -275,53 +294,32 @@ class IGClient:
         retry=retry_if_exception_type((IGException, ConnectionError))
     )
     def fetch_open_position_by_deal_id(self, deal_id: str):
-        """
-        Fetches a specific open position by its Deal ID.
-        Returns None if not found (implied closed).
-        """
         if not self.authenticated:
             self.authenticate()
             
         try:
+            # Use self.service
             positions = self.service.fetch_open_positions()
             
-            # Handle DataFrame response (typical for trading_ig)
             if isinstance(positions, pd.DataFrame):
                 if positions.empty:
                     return None
-                
-                # Check for 'dealId' column
                 if 'dealId' in positions.columns:
-                    # Filter for the specific deal ID
                     row = positions[positions['dealId'] == deal_id]
                     if not row.empty:
                         return row.iloc[0].to_dict()
                         
-            # Handle Dict response (fallback)
             elif isinstance(positions, dict):
                 if 'positions' in positions:
                     for pos in positions['positions']:
                         if pos.get('position', {}).get('dealId') == deal_id:
                              return pos
-            
             return None
         except Exception as e:
             logger.error(f"Error fetching position {deal_id}: {e}")
             return None
 
     def place_working_order(self, epic: str, direction: str, order_type: str, size: float, level: float, stop_level: float, limit_level: float = None):
-        """
-        Places a WORKING order (STOP or LIMIT) to be executed when price hits a level.
-        
-        Args:
-            epic (str): Instrument epic.
-            direction (str): 'BUY' or 'SELL'.
-            order_type (str): 'STOP' (Breakout) or 'LIMIT' (Mean Reversion).
-            size (float): Size per point.
-            level (float): The price level to trigger the order.
-            stop_level (float): Absolute price for stop loss.
-            limit_level (float, optional): Absolute price for take profit.
-        """
         if not self.authenticated:
             self.authenticate()
 
@@ -331,6 +329,7 @@ class IGClient:
         currency_code = 'GBP' 
         
         try:
+            # Use self.service
             response = self.service.create_working_order(
                 currency_code=currency_code,
                 direction=direction,
@@ -345,7 +344,6 @@ class IGClient:
                 stop_level=stop_level
             )
             
-            # Check confirmation for actual status
             deal_ref = response['dealReference']
             confirmation = self.service.fetch_deal_by_deal_reference(deal_ref)
             
@@ -361,8 +359,6 @@ class IGClient:
             logger.error(f"Working Order placement failed: {e}")
             raise
 
-        return self.service.fetch_market_by_epic(epic)
-
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=10),
@@ -371,6 +367,7 @@ class IGClient:
     def get_market_info(self, epic: str):
         """
         Fetches details about a market (min stop distance, etc).
+        Using trading service to ensure consistency with trading rules.
         """
         if not self.authenticated:
             self.authenticate()
@@ -379,7 +376,7 @@ class IGClient:
 
     def get_account_info(self):
         """
-        Fetches account details including available balance.
+        Fetches account details for the TRADING account.
         """
         if not self.authenticated:
             self.authenticate()
@@ -393,53 +390,13 @@ class IGClient:
     )
     def fetch_transaction_history_by_deal_id(self, deal_id: str):
         """
-        Fetches transaction history to find the closing details for a specific opening Deal ID.
-        Note: This searches recent history (e.g., last 24 hours) which is sufficient for this bot's intraday scope.
+        Fetches transaction history for the TRADING account.
         """
         if not self.authenticated:
             self.authenticate()
             
         try:
-            # Fetch last 24 hours of transaction history
-            # 'milliseconds' might be needed, or just standard 'ALL' type
-            history = self.service.fetch_transaction_history()
-            
-            if isinstance(history, pd.DataFrame):
-                if history.empty:
-                    return None
-                
-                # Depending on the dataframe columns, we look for the reference to our deal_id
-                # Often the closing transaction has 'openDateUtc' or similar linking it, 
-                # or a 'reference' field. 
-                # However, trading_ig's fetch_transaction_history usually returns a DF.
-                # Columns often include: 'date', 'instrumentName', 'period', 'profitAndLoss', 'transactionType', 'reference'
-                
-                # We need to find the transaction where 'reference' matches or is related.
-                # Actually, for a closing trade, the 'reference' is unique to the close.
-                # But usually there's a link.
-                # Let's try to filter by instrument and timestamp first if we can't match deal ID directly.
-                
-                # A better approach might be using /confirms/{dealId} but that's for the OPENING deal.
-                # To get the closing PnL, we need the deal that CLOSED it.
-                
-                # Let's iterate and see if we can match 'profitAndLoss' if we can't match ID.
-                # But we want precision.
-                
-                # Wait, fetch_transaction_history args: trans_type=None, from_date=None, to_date=None, max_span_seconds=None
-                # Let's fetch ALL recent transactions.
-                
-                # Filter for rows where we might find the PnL.
-                # Unfortunately, linking an opening Deal ID to a closing transaction in the generic history 
-                # can be tricky without the closing Deal ID.
-                
-                # Alternative: IG API has /history/transactions which might contain the link.
-                
-                # Let's just return the dataframe for the monitor to process, or try to find it here.
-                # For now, let's return the whole recent history (last few minutes/hours) 
-                # and let the monitor logic try to find the matching instrument and 'DEAL' type close.
-                return history
-            
-            return None
+            return self.service.fetch_transaction_history()
         except Exception as e:
             logger.error(f"Error fetching transaction history: {e}")
             return None
