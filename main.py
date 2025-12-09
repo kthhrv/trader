@@ -35,7 +35,7 @@ MARKET_CONFIGS = {
         "epic": "IX.D.FTSE.DAILY.IP",
         "strategy_name": "LONDON OPEN",
         "news_query": "FTSE 100 UK Economy",
-        "schedule": {"day_of_week": 'mon-fri', "hour": 7, "minute": 45, "timezone": 'Europe/London'},
+        "schedule": {"day_of_week": 'mon-fri', "hour": 7, "minute": 55, "timezone": 'Europe/London'},
         "timeout_seconds": 5400, # 90 minutes
         "max_spread": 2.0
     },
@@ -43,7 +43,7 @@ MARKET_CONFIGS = {
         "epic": "IX.D.SPTRD.DAILY.IP",
         "strategy_name": "NY OPEN",
         "news_query": "S&P 500 US Economy",
-        "schedule": {"day_of_week": 'mon-fri', "hour": 9, "minute": 15, "timezone": 'America/New_York'},
+        "schedule": {"day_of_week": 'mon-fri', "hour": 9, "minute": 25, "timezone": 'America/New_York'},
         "timeout_seconds": 5400, # 90 minutes
         "max_spread": 1.6
     },
@@ -51,7 +51,7 @@ MARKET_CONFIGS = {
         "epic": "IX.D.NIKKEI.DAILY.IP",
         "strategy_name": "NIKKEI OPEN",
         "news_query": "Nikkei 225 Japan Economy",
-        "schedule": {"day_of_week": 'mon-fri', "hour": 8, "minute": 45, "timezone": 'Asia/Tokyo'},
+        "schedule": {"day_of_week": 'mon-fri', "hour": 8, "minute": 55, "timezone": 'Asia/Tokyo'},
         "timeout_seconds": 5400, # 90 minutes
         "max_spread": 8.0
     }

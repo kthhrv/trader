@@ -6,7 +6,7 @@ from dotenv import dotenv_values
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from trading_ig import IGService
 from trading_ig.rest import IGException
-from config import IG_API_KEY, IG_USERNAME, IG_PASSWORD, IG_ACC_ID, IS_LIVE
+from config import IG_API_KEY, IG_USERNAME, IG_PASSWORD, IG_ACC_ID, IS_LIVE, ROOT_DIR
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -39,9 +39,9 @@ class IGClient:
         
         # Check for Live Data Override if we are in Demo mode
         if not IS_LIVE:
-            env_live_path = Path(".env.live")
+            env_live_path = ROOT_DIR / ".env.live"
             if env_live_path.exists():
-                logger.info("Detected .env.live - Attempting to configure Live Data Feed for Demo Bot...")
+                logger.info(f"Detected .env.live at {env_live_path} - Attempting to configure Live Data Feed for Demo Bot...")
                 config_live = dotenv_values(env_live_path)
                 
                 # Check if it's actually enabled/live
@@ -276,7 +276,7 @@ class IGClient:
 
         try:
             # Use self.service
-            response = self.service.edit_open_position(
+            response = self.service.update_open_position(
                 deal_id=deal_id,
                 stop_level=stop_level,
                 limit_level=limit_level

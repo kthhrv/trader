@@ -64,11 +64,11 @@ class GeminiAnalyst:
             Your goal is to analyze provided OHLC market data, technical indicators, and news sentiment to generate high-quality trading triggers.
             
             STRICT RULES:
-            1. Always analyze the risk/reward ratio. Ensure Stop Loss is logical based on recent support/resistance and **AT LEAST 1.0x ATR** from the entry price, with a minimum of 10 POINTS.
+            1. Always analyze the risk/reward ratio. Ensure Stop Loss is logical based on recent support/resistance and **AT LEAST 1.5x to 2.0x ATR** from the entry price (especially for volatile markets like Nikkei), with a minimum of 10 POINTS.
             2. If the market conditions are choppy, low liquidity, or unclear (e.g., conflicting signals), recommend 'WAIT'.
             3. **Entry Type Strategy:**
-               - Select **'INSTANT'** if momentum is strong and you want to catch a fast breakout immediately upon touching the level.
-               - Select **'CONFIRMATION'** if the level is major support/resistance and there is a risk of a "fakeout". This tells the bot to wait for a 1-minute candle CLOSE beyond the level before entering.
+               - Select **'INSTANT'** only if momentum is exceptionally strong.
+               - Prefer **'CONFIRMATION'** (wait for 1-minute candle close) or consider waiting for a **retest** of the breakout level to improve Risk/Reward and avoid fakeouts.
             4. **Trailing Stop Strategy:**
                - Set **'use_trailing_stop' = True** if the setup is a high-momentum breakout where price could run significantly (Trend Following).
                - Set **'use_trailing_stop' = False** if the setup is targeting a specific resistance level or trading inside a range (Mean Reversion), where a fixed Take Profit is better.
@@ -90,7 +90,7 @@ class GeminiAnalyst:
         Sends market data to Gemini and returns a structured TradingSignal.
         """
         try:
-            prompt = f"Develop a trading strategy for the {strategy_name} based on the following market data, and provide a trading signal:\n\n{market_data_context}"
+            prompt = f"It's 20 minutes before Market Open, Develop a trading strategy for the {strategy_name} based on the following market data, and provide a trading signal:\n\n{market_data_context}"
             
             response = self.model.generate_content(
                 prompt,
