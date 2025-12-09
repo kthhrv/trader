@@ -68,7 +68,7 @@ def test_authenticate_fail_account_not_found(mock_ig_service):
     
     with patch.object(config, 'IG_ACC_ID', 'NON_EXISTENT_ACC_ID'):
         client = IGClient()
-        with pytest.raises(Exception, match="Configured IG_ACC_ID .* not found"):
+        with pytest.raises(Exception, match="Configured Account ID .* not found in DEMO TRADING accounts."):
             client.authenticate()
 
 def test_authenticate_fail_no_accounts(mock_ig_service):

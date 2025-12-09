@@ -7,7 +7,7 @@ requires-python = ">=3.12"
 dependencies = [
     "apscheduler>=3.11.1",
     "feedparser>=6.0.12",
-    "google-generativeai>=0.8.5",
+    "google-genai>=0.8.0",
     "holidays>=0.85",
     "munch>=4.0.0",
     "pandas>=2.3.3",

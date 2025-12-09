@@ -1,8 +1,8 @@
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch, ANY
 import json
 from src.gemini_analyst import GeminiAnalyst, TradingSignal, Action, EntryType
-import typing_extensions as typing
+from google.genai import types
 
 # Mock response class to simulate Gemini's return object
 class MockGeminiResponse:
@@ -16,8 +16,8 @@ def mock_genai():
 
 def test_analyze_market_success(mock_genai):
     # Setup
-    mock_model = MagicMock()
-    mock_genai.GenerativeModel.return_value = mock_model
+    mock_client = MagicMock()
+    mock_genai.Client.return_value = mock_client
     
     # Define expected JSON response from Gemini
     expected_response = {
@@ -33,7 +33,7 @@ def test_analyze_market_success(mock_genai):
         "reasoning": "Breakout above resistance with strong volume."
     }
     
-    mock_model.generate_content.return_value = MockGeminiResponse(json.dumps(expected_response))    
+    mock_client.models.generate_content.return_value = MockGeminiResponse(json.dumps(expected_response))    
     # Execute
     analyst = GeminiAnalyst()
     result = analyst.analyze_market("Some market context", strategy_name="Test Strategy")
@@ -48,21 +48,24 @@ def test_analyze_market_success(mock_genai):
     assert result.size == 1.0
     
     # Verify call arguments
-    mock_model.generate_content.assert_called_once()
-    call_args = mock_model.generate_content.call_args
-    assert "Some market context" in call_args[0][0]
-    assert "Test Strategy" in call_args[0][0] # Check strategy name in prompt
+    mock_client.models.generate_content.assert_called_once()
+    call_kwargs = mock_client.models.generate_content.call_args.kwargs
     
-    # Check that genai.GenerationConfig was called with correct parameters
-    mock_genai.GenerationConfig.assert_called_with(
-        response_mime_type="application/json",
-        response_schema=TradingSignal
-    )
+    assert call_kwargs['model'] == "gemini-3-pro-preview"
+    assert "Some market context" in call_kwargs['contents']
+    assert "Test Strategy" in call_kwargs['contents']
+    
+    # Check config
+    assert 'config' in call_kwargs
+    config = call_kwargs['config']
+    assert isinstance(config, types.GenerateContentConfig)
+    assert config.response_mime_type == "application/json"
+    assert config.response_schema is not None
 
 def test_analyze_market_wait_action(mock_genai):
     # Setup
-    mock_model = MagicMock()
-    mock_genai.GenerativeModel.return_value = mock_model
+    mock_client = MagicMock()
+    mock_genai.Client.return_value = mock_client
     
     # Define expected JSON response from Gemini for a WAIT action
     expected_response = {
@@ -78,7 +81,7 @@ def test_analyze_market_wait_action(mock_genai):
         "reasoning": "Market conditions are currently unfavorable; awaiting clearer signals."
     }
     
-    mock_model.generate_content.return_value = MockGeminiResponse(json.dumps(expected_response))
+    mock_client.models.generate_content.return_value = MockGeminiResponse(json.dumps(expected_response))
     
     # Execute
     analyst = GeminiAnalyst()
@@ -91,18 +94,18 @@ def test_analyze_market_wait_action(mock_genai):
     assert result.confidence == "low"
     
     # Verify call arguments
-    mock_model.generate_content.assert_called_once()
-    call_args = mock_model.generate_content.call_args
-    assert "Some market context for WAIT" in call_args[0][0]
-    assert "Wait Strategy" in call_args[0][0]
+    mock_client.models.generate_content.assert_called_once()
+    call_kwargs = mock_client.models.generate_content.call_args.kwargs
+    assert "Some market context for WAIT" in call_kwargs['contents']
+    assert "Wait Strategy" in call_kwargs['contents']
 
 def test_analyze_market_failure_handles_exception(mock_genai):
     # Setup
-    mock_model = MagicMock()
-    mock_genai.GenerativeModel.return_value = mock_model
+    mock_client = MagicMock()
+    mock_genai.Client.return_value = mock_client
     
     # Simulate an API error
-    mock_model.generate_content.side_effect = Exception("API Error")
+    mock_client.models.generate_content.side_effect = Exception("API Error")
     
     # Execute
     analyst = GeminiAnalyst()
@@ -113,8 +116,8 @@ def test_analyze_market_failure_handles_exception(mock_genai):
 
 def test_analyze_market_optional_tp(mock_genai):
     # Setup
-    mock_model = MagicMock()
-    mock_genai.GenerativeModel.return_value = mock_model
+    mock_client = MagicMock()
+    mock_genai.Client.return_value = mock_client
     
     # Define expected JSON response from Gemini with null take_profit
     expected_response = {
@@ -131,7 +134,7 @@ def test_analyze_market_optional_tp(mock_genai):
         "reasoning": "Breakout above resistance with strong volume, using trailing stop."
     }
     
-    mock_model.generate_content.return_value = MockGeminiResponse(json.dumps(expected_response))    
+    mock_client.models.generate_content.return_value = MockGeminiResponse(json.dumps(expected_response))    
     # Execute
     analyst = GeminiAnalyst()
     result = analyst.analyze_market("Some market context", strategy_name="Test Strategy")

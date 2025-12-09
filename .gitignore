@@ -17,5 +17,5 @@ trading_plan.json
 .vscode/
 
 # db
-data/trader.db
+data
 .env.live

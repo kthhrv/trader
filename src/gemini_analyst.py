@@ -1,5 +1,6 @@
 import os
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 import typing_extensions as typing
 from pydantic import BaseModel, Field
 from enum import Enum
@@ -7,9 +8,6 @@ import json
 import pandas as pd
 from config import GEMINI_API_KEY
 
-# Configure the SDK
-if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
 
 
 class Action(str, Enum):
@@ -52,14 +50,15 @@ class GeminiAnalyst:
     def __init__(self, model_name: str = "gemini-3-pro-preview"):
 
         """
-        Initializes the Gemini Analyst with a Vertex AI model, but using the google-generativeai SDK.
+        Initializes the Gemini Analyst with a Vertex AI model, using the google-genai SDK.
         """
 
         self.model_name = model_name
+        
+        # Initialize the client directly
+        self.client = genai.Client(api_key=GEMINI_API_KEY)
 
-        self.model = genai.GenerativeModel(
-            model_name=self.model_name,
-            system_instruction="""
+        self.system_instruction = """
             You are an expert financial trading analyst specializing in breakout strategies for market opens (London/Nikkei).
             Your goal is to analyze provided OHLC market data, technical indicators, and news sentiment to generate high-quality trading triggers.
             
@@ -80,7 +79,6 @@ class GeminiAnalyst:
                *   **Risk/Reward:** Briefly state the estimated risk/reward for the proposed trade.
             6. After the Chain-of-Thought, your final output MUST be strictly in the requested JSON format, and ONLY the JSON. Ensure the 'atr' field reflects the current ATR value provided in the market context.
             """
-        )
 
 
 
@@ -92,11 +90,13 @@ class GeminiAnalyst:
         try:
             prompt = f"It's 20 minutes before Market Open, Develop a trading strategy for the {strategy_name} based on the following market data, and provide a trading signal:\n\n{market_data_context}"
             
-            response = self.model.generate_content(
-                prompt,
-                generation_config=genai.GenerationConfig(
+            response = self.client.models.generate_content(
+                model=self.model_name,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    system_instruction=self.system_instruction,
                     response_mime_type="application/json",
-                    response_schema=TradingSignal
+                    response_schema=TradingSignal.model_json_schema()
                 )
             )
             
@@ -200,46 +200,49 @@ class GeminiAnalyst:
         """
         
         try:
-            # Create a temporary config for text
-            text_config = genai.GenerationConfig(
-                temperature=0.2,
-                max_output_tokens=8192 # Increased token limit to prevent truncation
-            )
+            # Create config with safety settings
+            # Using dictionary format which is often supported, or referencing types if needed.
+            # For google-genai, usage of types is preferred.
             
-            # Permissive safety settings for financial analysis
             safety_settings = [
-                {
-                    "category": "HARM_CATEGORY_HARASSMENT",
-                    "threshold": "BLOCK_NONE",
-                },
-                {
-                    "category": "HARM_CATEGORY_HATE_SPEECH",
-                    "threshold": "BLOCK_NONE",
-                },
-                {
-                    "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
-                    "threshold": "BLOCK_NONE",
-                },
-                {
-                    "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
-                    "threshold": "BLOCK_NONE",
-                },
+                types.SafetySetting(
+                    category="HARM_CATEGORY_HARASSMENT",
+                    threshold="BLOCK_NONE"
+                ),
+                types.SafetySetting(
+                    category="HARM_CATEGORY_HATE_SPEECH",
+                    threshold="BLOCK_NONE"
+                ),
+                types.SafetySetting(
+                    category="HARM_CATEGORY_SEXUALLY_EXPLICIT",
+                    threshold="BLOCK_NONE"
+                ),
+                types.SafetySetting(
+                    category="HARM_CATEGORY_DANGEROUS_CONTENT",
+                    threshold="BLOCK_NONE"
+                ),
             ]
             
-            response = self.model.generate_content(
-                prompt, 
-                generation_config=text_config,
+            config = types.GenerateContentConfig(
+                temperature=0.2,
+                max_output_tokens=8192,
                 safety_settings=safety_settings
+            )
+            
+            response = self.client.models.generate_content(
+                model=self.model_name,
+                contents=prompt, 
+                config=config
             )
             
             # Safely access text
             if response.candidates:
                 candidate = response.candidates[0]
-                if candidate.content.parts:
+                if candidate.content and candidate.content.parts:
                     return response.text
-                elif candidate.finish_reason == 3: # SAFETY
+                elif candidate.finish_reason == types.FinishReason.SAFETY: # SAFETY
                     return f"Analysis blocked by safety filters. Ratings: {candidate.safety_ratings}"
-                elif candidate.finish_reason == 2: # MAX_TOKENS
+                elif candidate.finish_reason == types.FinishReason.MAX_TOKENS: # MAX_TOKENS
                     try:
                         return response.text + "\n[TRUNCATED]"
                     except:
