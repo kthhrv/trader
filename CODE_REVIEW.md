@@ -2,22 +2,19 @@
 
 This document outlines critical issues and improvement areas identified in the `trader` codebase.
 
-## 1. Critical Efficiency Issue: Streaming Service Restarts
+## 1. Streaming Service Restarts (Efficiency vs. Isolation)
 - **File:** `src/stream_manager.py` (Lines 100-111)
-- **Issue:** The `StreamManager` terminates and restarts the Node.js subprocess every time a new market subscription is requested via `subscribe_to_epic`.
-- **Impact:** 
-    - Prevents concurrent monitoring of multiple markets.
-    - Causes unnecessary latency and connection overhead.
-    - Risk of being flagged for too many connection attempts by IG Markets.
-- **Recommendation:** Refactor `src/stream_service.js` and `StreamManager` to use Inter-Process Communication (IPC) via `stdin` to allow dynamic subscriptions without process restarts.
+- **Issue:** The `StreamManager` terminates and restarts the Node.js subprocess for new subscriptions.
+- **Investigation Update (2025-12-17):** While inefficient for a single strategy watching multiple epics, this behavior provides **Isolation Safety** for concurrent sessions (e.g., London and NY). Each session gets a dedicated Node.js process, preventing a crash in one from affecting others.
+- **Verification:** Verified via `tests/test_concurrency.py`, which confirms overlapping trades operate independently without data loss.
+- **Status:** **ACKNOWLEDGED** (Isolation prioritized over efficiency for now).
 
 ## 2. Rate Limit Risk: Redundant REST Polling
 - **File:** `src/trade_monitor_db.py` (Lines 137-172)
 - **Issue:** The `monitor_trade` loop polls the IG REST API (`fetch_open_position_by_deal_id`) every 5 seconds to calculate trailing stops.
-- **Impact:** 
-    - High consumption of API rate limits.
-    - Sub-optimal performance compared to real-time streaming.
+- **Impact:** High consumption of API rate limits.
 - **Recommendation:** Modify `TradeMonitorDB` to listen for price updates from the `StreamManager` and update stop-loss levels reactively based on streamed data.
+- **Status:** **OPEN**
 
 ## 3. Maintainability: Manual API Request Construction
 - **File:** `src/ig_client.py` (Lines 188-209)
