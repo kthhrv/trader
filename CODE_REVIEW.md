@@ -9,12 +9,11 @@ This document outlines critical issues and improvement areas identified in the `
 - **Verification:** Verified via `tests/test_concurrency.py`, which confirms overlapping trades operate independently without data loss.
 - **Status:** **ACKNOWLEDGED** (Isolation prioritized over efficiency for now).
 
-## 2. Rate Limit Risk: Redundant REST Polling
+## 2. REST Polling for Trailing Stops (State Integrity)
 - **File:** `src/trade_monitor_db.py` (Lines 137-172)
-- **Issue:** The `monitor_trade` loop polls the IG REST API (`fetch_open_position_by_deal_id`) every 5 seconds to calculate trailing stops.
-- **Impact:** High consumption of API rate limits.
-- **Recommendation:** Modify `TradeMonitorDB` to listen for price updates from the `StreamManager` and update stop-loss levels reactively based on streamed data.
-- **Status:** **OPEN**
+- **Issue:** The `monitor_trade` loop polls the IG REST API every 5 seconds.
+- **Investigation Update (2025-12-17):** While streaming provides price data, the REST API is used to fetch the **current server-side `stopLevel`**. This ensures the bot never attempts to move a stop backward or out of sync with IG's internal state. This polling is a strategic choice to ensure **State Integrity** over raw bandwidth efficiency.
+- **Status:** **ACKNOWLEDGED** (Safety prioritized over rate-limit optimization).
 
 ## 3. Maintainability: Manual API Request Construction
 - **File:** `src/ig_client.py` (Lines 188-209)
@@ -30,7 +29,4 @@ This document outlines critical issues and improvement areas identified in the `
 - **Issue:** Shared state (e.g., `current_bid`, `current_offer`) is updated in background threads and read in the main strategy loop without explicit locks or thread-safe primitives.
 - **Impact:** Potential for race conditions, especially if logic becomes more complex.
 - **Recommendation:** Implement `threading.Lock` for shared state access or use thread-safe `Queue` objects for data transfer.
-
----
-**Status:** Open
-**Date Identified:** 2025-12-17
+- **Status:** **RESOLVED** (Implemented `threading.Lock` for atomic price updates on 2025-12-17).

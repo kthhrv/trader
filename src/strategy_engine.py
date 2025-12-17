@@ -1,6 +1,7 @@
 import logging
 import time
 import uuid
+import threading
 from typing import Optional
 from datetime import datetime
 import pandas as pd
@@ -50,6 +51,7 @@ class StrategyEngine:
         self.position_open = False
         self.current_bid: float = 0.0
         self.current_offer: float = 0.0
+        self.price_lock = threading.Lock() # Lock for synchronizing price updates
         self.last_skipped_log_time: float = 0.0 # For rate-limiting skipped logs
         
     def generate_plan(self):
@@ -292,7 +294,12 @@ class StrategyEngine:
                 # The stream handler will update prices in the background.
                 time.sleep(0.1)
 
-                if self.current_bid == 0 or self.current_offer == 0:
+                # Thread-safe read of prices
+                with self.price_lock:
+                    bid_snapshot = self.current_bid
+                    offer_snapshot = self.current_offer
+
+                if bid_snapshot == 0 or offer_snapshot == 0:
                     continue
 
                 # Log status every 10 seconds to show it's alive
@@ -301,20 +308,20 @@ class StrategyEngine:
                     wait_msg = ""
                     if plan.entry_type == EntryType.INSTANT:
                         if plan.action == Action.BUY:
-                            wait_msg = f"Waiting for BUY trigger (INSTANT): Offer {self.current_offer} >= {plan.entry}"
+                            wait_msg = f"Waiting for BUY trigger (INSTANT): Offer {offer_snapshot} >= {plan.entry}"
                         elif plan.action == Action.SELL:
-                            wait_msg = f"Waiting for SELL trigger (INSTANT): Bid {self.current_bid} <= {plan.entry}"
+                            wait_msg = f"Waiting for SELL trigger (INSTANT): Bid {bid_snapshot} <= {plan.entry}"
                     elif plan.entry_type == EntryType.CONFIRMATION:
                         if plan.action == Action.BUY:
                             wait_msg = f"Waiting for BUY trigger (CONFIRMATION): Candle Close > {plan.entry}"
                         elif plan.action == Action.SELL:
                             wait_msg = f"Waiting for SELL trigger (CONFIRMATION): Candle Close < {plan.entry}"
                     
-                    logger.info(f"MONITORING ({self.epic}): {wait_msg} | Current Bid/Offer: {self.current_bid}/{self.current_offer}")
+                    logger.info(f"MONITORING ({self.epic}): {wait_msg} | Current Bid/Offer: {bid_snapshot}/{offer_snapshot}")
                     last_log_time = current_time
                 
                 # --- Spread and Trigger Logic ---
-                current_spread = round(abs(self.current_offer - self.current_bid), 2)
+                current_spread = round(abs(offer_snapshot - bid_snapshot), 2)
                 triggered = False
 
                 if current_spread > self.max_spread:
@@ -327,14 +334,14 @@ class StrategyEngine:
                 if plan.entry_type == EntryType.INSTANT:
                     # Logic 1: INSTANT (Touch Entry)
                     if plan.action == Action.BUY:
-                        if self.current_offer >= plan.entry:
+                        if offer_snapshot >= plan.entry:
                             triggered = True
-                            logger.info(f"BUY TRIGGERED (INSTANT): Offer {self.current_offer} >= Entry {plan.entry} (Spread: {current_spread})")
+                            logger.info(f"BUY TRIGGERED (INSTANT): Offer {offer_snapshot} >= Entry {plan.entry} (Spread: {current_spread})")
                             
                     elif plan.action == Action.SELL:
-                        if self.current_bid <= plan.entry:
+                        if bid_snapshot <= plan.entry:
                             triggered = True
-                            logger.info(f"SELL TRIGGERED (INSTANT): Bid {self.current_bid} <= Entry {plan.entry} (Spread: {current_spread})")
+                            logger.info(f"SELL TRIGGERED (INSTANT): Bid {bid_snapshot} <= Entry {plan.entry} (Spread: {current_spread})")
                 
                 elif plan.entry_type == EntryType.CONFIRMATION:
                     # Logic 2: CONFIRMATION (Candle Close)
@@ -396,8 +403,9 @@ class StrategyEngine:
         market_state = data.get('market_state', 'UNKNOWN')
 
         if epic == self.epic:
-            self.current_bid = bid
-            self.current_offer = offer
+            with self.price_lock:
+                self.current_bid = bid
+                self.current_offer = offer
 
     def _calculate_size(self, entry: float, stop_loss: float) -> float:
         """
