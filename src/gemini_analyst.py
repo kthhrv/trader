@@ -64,20 +64,21 @@ class GeminiAnalyst:
             
             STRICT RULES:
             1. Always analyze the risk/reward ratio. Ensure Stop Loss is logical based on recent support/resistance and **AT LEAST 1.5x to 2.0x ATR** from the entry price (especially for volatile markets like Nikkei), with a minimum of 10 POINTS.
-            2. If the market conditions are choppy, low liquidity, or unclear (e.g., conflicting signals), recommend 'WAIT'.
-            3. **Entry Type Strategy:**
+            2. **Structure over Arbitrary Ratios:** Do not place stops inside the rejection zone. If the structural invalidation point (e.g. 6829) requires a stop that is too wide for the account risk parameters, reduce position size rather than tightening the stop to an arbitrary level (e.g. 6816).
+            3. If the market conditions are choppy, low liquidity, or unclear (e.g., conflicting signals), recommend 'WAIT'.
+            4. **Entry Type Strategy:**
                - Select **'INSTANT'** only if momentum is exceptionally strong.
                - Prefer **'CONFIRMATION'** (wait for 1-minute candle close) or consider waiting for a **retest** of the breakout level to improve Risk/Reward and avoid fakeouts.
-            4. **Trailing Stop Strategy:**
+            5. **Trailing Stop Strategy:**
                - Set **'use_trailing_stop' = True** if the setup is a high-momentum breakout where price could run significantly (Trend Following).
                - Set **'use_trailing_stop' = False** if the setup is targeting a specific resistance level or trading inside a range (Mean Reversion), where a fixed Take Profit is better.
-            5. Your output MUST follow a Chain-of-Thought process BEFORE the JSON, like this:
+            6. Your output MUST follow a Chain-of-Thought process BEFORE the JSON, like this:
                *   **Market Overview:** Summarize the current trend, volatility (ATR), and momentum (RSI).
                *   **Key Levels:** Identify significant support and resistance levels from the OHLC data.
                *   **News Sentiment:** Evaluate the overall sentiment from the provided news headlines (Positive, Negative, Neutral).
                *   **Trade Rationale:** Based on the above, explain WHY a BUY/SELL/WAIT signal is generated. Justify entry, stop loss, take profit, trade size, and why the **ATR-based stop** is appropriate. Explicitly justify the choice of 'INSTANT' vs 'CONFIRMATION' entry AND 'use_trailing_stop'. Ensure Stop Loss is NOT placed *within* the range of the opening 5-minute candle; instead, aim for structural lows (e.g., below the 08:00 low for a BUY).
                *   **Risk/Reward:** Briefly state the estimated risk/reward for the proposed trade.
-            6. After the Chain-of-Thought, your final output MUST be strictly in the requested JSON format, and ONLY the JSON. Ensure the 'atr' field reflects the current ATR value provided in the market context.
+            7. After the Chain-of-Thought, your final output MUST be strictly in the requested JSON format, and ONLY the JSON. Ensure the 'atr' field reflects the current ATR value provided in the market context.
             """
 
 
