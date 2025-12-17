@@ -140,11 +140,11 @@ def save_post_mortem(deal_id: str, analysis: str, db_path=None):
     finally:
         conn.close()
 
-def fetch_recent_trades(limit: int = 5):
+def fetch_recent_trades(limit: int = 5, db_path=None):
     """
     Fetches the N most recent trades from the trade_log.
     """
-    conn = get_db_connection()
+    conn = get_db_connection(db_path)
     cursor = conn.cursor()
     try:
         cursor.execute("SELECT * FROM trade_log ORDER BY timestamp DESC LIMIT ?", (limit,))
