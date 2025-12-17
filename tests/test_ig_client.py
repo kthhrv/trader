@@ -109,11 +109,8 @@ def test_place_spread_bet_order_success(mock_ig_service):
     mock_instance = MagicMock()
     mock_ig_service.return_value = mock_instance
     
-    # Mock the session.post response
-    mock_response = MagicMock()
-    mock_response.status_code = 200
-    mock_response.json.return_value = {'dealReference': 'REF123'}
-    mock_instance.session.post.return_value = mock_response
+    # Mock create_open_position response
+    mock_instance.create_open_position.return_value = {'dealReference': 'REF123'}
     
     # Mock confirmation
     mock_instance.fetch_deal_by_deal_reference.return_value = {
@@ -135,19 +132,25 @@ def test_place_spread_bet_order_success(mock_ig_service):
     assert confirmation['dealStatus'] == 'ACCEPTED'
     assert confirmation['dealReference'] == 'REF123'
     
-    # Check that session.post was called instead of create_open_position
-    mock_instance.session.post.assert_called_once()
-    
-    # Verify payload
-    call_args = mock_instance.session.post.call_args
-    payload = call_args[1]['json']
-    
-    assert payload['epic'] == "CS.D.FTSE.TODAY.IP"
-    assert payload['direction'] == "BUY"
-    assert payload['size'] == 1
-    assert payload['stopLevel'] == 7450
-    assert payload['currencyCode'] == 'GBP'
-    assert payload['expiry'] == 'DFB'
+    # Check that create_open_position was called
+    mock_instance.create_open_position.assert_called_once_with(
+        currency_code='GBP',
+        direction='BUY',
+        epic='CS.D.FTSE.TODAY.IP',
+        expiry='DFB',
+        force_open=True,
+        guaranteed_stop=False,
+        level=None,
+        limit_level=None,
+        limit_distance=None,
+        order_type='MARKET',
+        quote_id=None,
+        size=1,
+        stop_distance=None,
+        stop_level=7450,
+        trailing_stop=False,
+        trailing_stop_increment=None
+    )
 
 def test_close_open_position_success(mock_ig_service):
     mock_instance = MagicMock()

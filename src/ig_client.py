@@ -211,6 +211,7 @@ class IGClient:
     def place_spread_bet_order(self, epic: str, direction: str, size: float, stop_level: float, level: float = None, limit_level: float = None):
         """
         Places a SPREAD BET order using self.service (TRADING service).
+        Refactored to use the trading_ig library's create_open_position method.
         """
         if not self.authenticated:
             self.authenticate()
@@ -220,52 +221,46 @@ class IGClient:
         
         currency_code = 'GBP' 
         
-        payload = {
-            "epic": epic,
-            "direction": direction,
-            "size": size,
-            "expiry": "DFB",
-            "orderType": "MARKET",
-            "currencyCode": currency_code,
-            "forceOpen": True,
-            "guaranteedStop": False,
-            "timeInForce": "FILL_OR_KILL"
-        }
-
-        if stop_level is not None:
-            payload["stopLevel"] = stop_level
-        if limit_level is not None:
-            payload["limitLevel"] = limit_level
-
         try:
-            # Use self.service for Trading
-            from config import IS_LIVE
-            base_url = "https://api.ig.com/gateway/deal" if IS_LIVE else "https://demo-api.ig.com/gateway/deal"
-            endpoint = "/positions/otc"
-            url = f"{base_url}{endpoint}"
+            logger.info(f"Placing Spread Bet: Epic={epic}, Dir={direction}, Size={size}, Stop={stop_level}, Limit={limit_level}")
             
-            headers = {"Version": "2"}
-            logger.info(f"Sending Order Payload: {payload}")
+            # Use self.service.create_open_position
+            response = self.service.create_open_position(
+                currency_code=currency_code,
+                direction=direction,
+                epic=epic,
+                expiry="DFB", # DFB for Daily Funded Bet (Spread Bet)
+                force_open=True,
+                guaranteed_stop=False,
+                level=level, # Usually None for Market orders
+                limit_level=limit_level,
+                limit_distance=None,
+                order_type="MARKET",
+                quote_id=None,
+                size=size,
+                stop_distance=None,
+                stop_level=stop_level,
+                trailing_stop=False, # Trailing stop is managed manually in TradeMonitorDB
+                trailing_stop_increment=None
+            )
             
-            response = self.service.session.post(url, json=payload, headers=headers)
-            
-            if response.status_code != 200:
-                logger.error(f"Order failed with status {response.status_code}: {response.text}")
-                raise Exception(f"API Error: {response.text}")
-            
-            response_data = response.json()
-            deal_ref = response_data['dealReference']
-            logger.info(f"Order Submitted. Deal Ref: {deal_ref}")
+            if 'dealReference' in response:
+                deal_ref = response['dealReference']
+                logger.info(f"Order Submitted. Deal Ref: {deal_ref}")
 
-            confirmation = self.service.fetch_deal_by_deal_reference(deal_ref)
-            
-            if confirmation['dealStatus'] == 'ACCEPTED':
-                logger.info(f"Market Order ACCEPTED: {deal_ref}")
-                return confirmation
+                confirmation = self.service.fetch_deal_by_deal_reference(deal_ref)
+                
+                if confirmation['dealStatus'] == 'ACCEPTED':
+                    logger.info(f"Market Order ACCEPTED: {deal_ref}")
+                    return confirmation
+                else:
+                    logger.error(f"Market Order REJECTED Full Details: {confirmation}")
+                    reason = confirmation.get('reason', 'Unknown')
+                    raise Exception(f"Order rejected: {reason}")
             else:
-                logger.error(f"Market Order REJECTED Full Details: {confirmation}")
-                reason = confirmation.get('reason', 'Unknown')
-                raise Exception(f"Order rejected: {reason}")
+                 # Should not happen with successful library call, but handling just in case
+                 logger.error(f"Unexpected response format from create_open_position: {response}")
+                 raise Exception(f"API Error: Unexpected response {response}")
 
         except Exception as e:
             logger.error(f"Order placement failed: {e}")
