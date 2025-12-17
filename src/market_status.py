@@ -1,7 +1,8 @@
 import logging
-from datetime import date, timedelta
+from datetime import date, timedelta, datetime
 import holidays
 from typing import Optional
+import pytz
 
 logger = logging.getLogger(__name__)
 
@@ -88,3 +89,52 @@ class MarketStatus:
             return "CLOSED (Holiday)"
         # In a real scenario, this would check specific market hours based on epic
         return "OPEN"
+
+    def _get_market_hours(self, epic: str) -> dict:
+        """
+        Returns the market hours (open/close) for a given epic.
+        Times are in the market's local timezone.
+        """
+        country = self._get_country_code(epic)
+        
+        # Default fallback
+        schedule = {"open": "09:00", "close": "17:00", "timezone": "UTC"}
+        
+        if country == "UK": # FTSE
+            schedule = {"open": "08:00", "close": "16:30", "timezone": "Europe/London"}
+        elif country == "US": # SPX, NASDAQ, DOW
+            schedule = {"open": "09:30", "close": "16:00", "timezone": "America/New_York"}
+        elif country == "JP": # Nikkei
+            schedule = {"open": "09:00", "close": "15:00", "timezone": "Asia/Tokyo"}
+        elif country == "DE": # DAX
+            schedule = {"open": "09:00", "close": "17:30", "timezone": "Europe/Berlin"}
+            
+        return schedule
+
+    def get_market_close_time_str(self, epic: str) -> str:
+        """
+        Returns the market close time as a string (e.g., "16:30 Europe/London").
+        """
+        schedule = self._get_market_hours(epic)
+        return f"{schedule['close']} ({schedule['timezone']})"
+
+    def get_market_close_datetime(self, epic: str) -> datetime:
+        """
+        Returns the next market close time as a localized datetime object.
+        """
+        schedule = self._get_market_hours(epic)
+        close_time_str = schedule['close']
+        timezone_str = schedule['timezone']
+        
+        tz = pytz.timezone(timezone_str)
+        now_tz = datetime.now(tz)
+        
+        hour, minute = map(int, close_time_str.split(':'))
+        
+        close_dt = now_tz.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        
+        # If it's already past today's close, the next close is tomorrow (simplification)
+        if now_tz > close_dt:
+            close_dt += timedelta(days=1)
+            
+        return close_dt

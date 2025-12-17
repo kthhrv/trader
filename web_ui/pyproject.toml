@@ -1,0 +1,14 @@
+[project]
+name = "web-ui"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "dotenv>=0.9.9",
+    "holidays>=0.85",
+    "pandas>=2.3.3",
+    "pandas-ta>=0.4.71b0",
+    "plotly>=6.5.0",
+    "reflex>=0.8.21",
+    "tenacity>=9.1.2",
+    "trading-ig>=0.0.22",
+]

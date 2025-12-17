@@ -2,7 +2,9 @@ import reflex as rx
 import sys
 import os
 import pandas as pd
+import pandas_ta as ta
 from datetime import datetime, timedelta
+import plotly.graph_objects as go # Import Plotly
 
 # Add parent directory to path to import src
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../")))
@@ -10,7 +12,6 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"
 from src.database import fetch_recent_trades
 from src.market_status import MarketStatus
 from src.ig_client import IGClient
-from src.yfinance_client import YFinanceClient
 
 class State(rx.State):
     """The app state."""
@@ -23,10 +24,17 @@ class State(rx.State):
 
     # Trade Detail & Graph State
     selected_trade: dict = {}
-    candle_data: list[dict] = []
+    chart_figure: go.Figure = go.Figure() # Plotly Figure State
     show_detail: bool = False
     is_loading_graph: bool = False
     graph_cache: dict = {}
+    is_fullscreen: bool = False
+
+    class Config:
+        arbitrary_types_allowed = True
+        
+    def toggle_fullscreen(self):
+        self.is_fullscreen = not self.is_fullscreen
 
     def load_data(self):
         """Fetch data from the database and update market status."""
@@ -74,13 +82,10 @@ class State(rx.State):
         self.selected_trade = trade
         self.show_detail = True
         self.is_loading_graph = True
-        self.candle_data = [] # Reset old data
+        self.chart_figure = go.Figure() # Reset figure
         
-        # Async-like yield to show loading state if needed, but for now we block simply
-        # In production, this should be a background task or cached
         try:
             # Parse timestamps
-            # timestamp format: ISO (e.g. 2023-10-27T10:00:00.123456)
             entry_ts_str = trade.get("timestamp")
             exit_ts_str = trade.get("exit_time")
 
@@ -94,184 +99,349 @@ class State(rx.State):
                 try:
                     exit_dt = datetime.fromisoformat(exit_ts_str)
                 except ValueError:
-                    # Fallback if exit time is not standard ISO
                     exit_dt = datetime.now()
             else:
                 exit_dt = datetime.now()
 
-            # Add formatted times for graph vertical lines
-            # Update selected_trade with graph-ready time strings
-            trade_updates = self.selected_trade.copy()
-            trade_updates["entry_time_graph"] = entry_dt.strftime("%H:%M")
-            trade_updates["exit_time_graph"] = exit_dt.strftime("%H:%M")
-
-            # Calculate Trailing Activation Price (1.5R)
-            activation_price = 0
-            try:
-                entry_val = trade.get("entry")
-                stop_loss_val = trade.get("stop_loss")
-                
-                entry_price = float(entry_val) if entry_val is not None else 0.0
-                stop_loss = float(stop_loss_val) if stop_loss_val is not None else 0.0
-                action = trade.get("action", "")
-                
-                if entry_price != 0 and stop_loss != 0:
-                    risk = abs(entry_price - stop_loss)
-                    if action == "BUY":
-                        activation_price = entry_price + (1.5 * risk)
-                    elif action == "SELL":
-                        activation_price = entry_price - (1.5 * risk)
-            except Exception as e:
-                print(f"Error calculating activation price: {e}")
-            
-            trade_updates["trailing_activation_price"] = activation_price
-
-            self.selected_trade = trade_updates
-
-            # Check Cache
-            deal_id = trade.get("deal_id")
-            if deal_id and str(deal_id) in self.graph_cache:
-                print(f"Loading graph for {deal_id} from cache.")
-                self.candle_data = self.graph_cache[str(deal_id)]
-                self.is_loading_graph = False
-                return
-
-            # Define Window: Entry - 30m to Exit + 30m
-            start_dt = entry_dt - timedelta(minutes=30)
+            # Define Window: Entry - 3h to Exit + 30m to ensure enough data for indicators (20 SMA etc)
+            start_dt = entry_dt - timedelta(hours=3)
             end_dt = exit_dt + timedelta(minutes=30)
 
-            # Determine resolution based on duration to save API allowance
+            # Determine resolution
             duration = end_dt - start_dt
             if duration > timedelta(hours=24):
                 resolution = "1H"
             elif duration > timedelta(hours=4):
                 resolution = "5Min"
             else:
-                resolution = "1Min"
+                resolution = "5Min"
 
-            # Format for IG API: YYYY-MM-DD HH:MM:SS
+            # Format for IG API
             fmt = "%Y-%m-%d %H:%M:%S"
             
-            # Use YFinanceClient to fetch (bypassing IG quota)
-            client = YFinanceClient() 
-            
+            # Use IGClient
+            client = IGClient() 
             epic = trade.get("epic")
-
-            print(f"DEBUG: Fetching YF data for epic='{epic}', resolution='{resolution}', start_dt='{start_dt}', end_dt='{end_dt}")
             
-            df = client.fetch_historical_data_by_range(
-                epic, resolution, start_dt.strftime(fmt), end_dt.strftime(fmt)
-            )
+            # --- Caching Implementation ---
+            cache_dir = os.path.join(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../")), "data", "cache")
+            os.makedirs(cache_dir, exist_ok=True)
+            
+            # Create a filesystem-safe filename
+            safe_epic = epic.replace(".", "_").replace(":", "")
+            cache_filename = f"{safe_epic}_{resolution}_{start_dt.strftime('%Y%m%d%H%M')}_{end_dt.strftime('%Y%m%d%H%M')}.csv"
+            cache_path = os.path.join(cache_dir, cache_filename)
 
-            # Fallback for missing high-res data (common with yfinance pre-market)
-            if df.empty and resolution == "1Min":
-                print(f"DEBUG: 1Min data empty for {epic}. Retrying with 5Min resolution...")
-                resolution = "5Min"
-                df = client.fetch_historical_data_by_range(
-                    epic, resolution, start_dt.strftime(fmt), end_dt.strftime(fmt)
-                )
+            df = pd.DataFrame()
+            
+            if os.path.exists(cache_path):
+                print(f"DEBUG: Cache HIT. Loading from {cache_path}")
+                try:
+                    df = pd.read_csv(cache_path, index_col=0, parse_dates=True)
+                except Exception as e:
+                    print(f"Error reading cache: {e}. Re-fetching.")
+            
+            if df.empty:
+                print(f"DEBUG: Cache MISS. Fetching IG data for {epic} ({resolution})...")
+                try:
+                    df = client.fetch_historical_data_by_range(
+                        epic, resolution, start_dt.strftime(fmt), end_dt.strftime(fmt)
+                    )
+                    # Save to cache if valid
+                    if not df.empty:
+                        df.to_csv(cache_path)
+                        print(f"DEBUG: Saved data to {cache_path}")
+                except Exception as e:
+                    print(f"IG Data Fetch failed: {e}. Graph will be empty.")
+                    # Do not fallback to YFinance
 
             if df.empty:
                 print(f"No graph data found for {epic}")
-                self.candle_data = []
                 self.is_loading_graph = False
                 return
 
-            # Process DF for Recharts
-            # DF has 'open', 'high', 'low', 'close', 'volume'
-            # Index is DateTime usually, but let's check reset_index
             if isinstance(df.index, pd.DatetimeIndex):
                 df = df.reset_index()
+            date_col = df.columns[0]
             
-            # The date column might be named 'date' or 'DateTime' depending on trading_ig version
-            # But IGClient._process_historical_df usually leaves index as is.
-            # Let's inspect columns after reset_index
-            date_col = df.columns[0] # Assume first column is date after reset
-
-            # Calculate Offset to Align Futures Data with Spot Entry
-            entry_price = float(trade.get("entry", 0))
-            price_offset = 0
-            if entry_price > 0 and not df.empty:
-                # Find the candle closest to the entry time, or just use the first one if simple alignment
-                # Ideally, we align the 'close' of the candle near entry_dt to the entry_price.
-                # But for simplicity and to keep the trend relative, aligning the FIRST candle's close
-                # to the entry price might distort the start if entry was later.
-                # Better: Calculate mean difference? No.
-                # Simple heuristic: Shift so the *average* price matches the entry? No.
-                # Let's shift so the price at 'entry_time' matches 'entry_price'.
-                
-                # Find row closest to entry_dt
-                # entry_dt is already parsed
-                # df[date_col] are timestamps.
-                
-                # Normalize timezones to avoid TypeError
-                if pd.api.types.is_datetime64_any_dtype(df[date_col]):
-                    df[date_col] = df[date_col].dt.tz_localize(None)
-                entry_dt = entry_dt.replace(tzinfo=None)
-
-                closest_idx = (df[date_col] - entry_dt).abs().idxmin()
-                reference_price = df.iloc[closest_idx]['close']
-                price_offset = entry_price - reference_price
-                print(f"DEBUG: Aligning graph. Entry: {entry_price}, Ref Candle: {reference_price}, Offset: {price_offset}")
-
-            data = []
-            for _, row in df.iterrows():
-                # Convert date to string
-                ts = row[date_col]
-                if isinstance(ts, (pd.Timestamp, datetime)):
-                    ts_str = ts.strftime("%H:%M")
-                else:
-                    ts_str = str(ts)
-
-                # Apply offset to align visuals
-                aligned_price = row["close"] + price_offset
-
-                data.append({
-                    "time": ts_str,
-                    "price": aligned_price
-                })
+            # Check cache if needed, but plotting is fast enough usually
             
-            self.candle_data = data
-            
-            # Update Cache
-            if deal_id:
-                self.graph_cache[str(deal_id)] = data
+            # --- Plotly Figure Construction ---
+            fig = go.Figure(data=[go.Candlestick(
+                x=df[date_col],
+                open=df['open'],
+                high=df['high'],
+                low=df['low'],
+                close=df['close'],
+                name=epic
+            )])
 
-            # Calculate Y-Axis Domain to include all markers
-            prices = [d["price"] for d in data]
-            if prices:
-                min_price = min(prices)
-                max_price = max(prices)
+            # Add Trend Line (SMA 10)
+            fig.add_trace(go.Scatter(
+                x=df[date_col], 
+                y=df['close'].rolling(window=10).mean(), 
+                mode='lines', 
+                name='Trend (SMA 10)', 
+                line=dict(color='yellow', width=1.5)
+            ))
+
+            # Add Bollinger Bands
+            sma_20 = df['close'].rolling(window=20).mean()
+            std_20 = df['close'].rolling(window=20).std()
+            upper_bb = sma_20 + (std_20 * 2)
+            lower_bb = sma_20 - (std_20 * 2)
+
+            fig.add_trace(go.Scatter(
+                x=df[date_col], y=upper_bb,
+                line=dict(color='rgba(255, 255, 255, 0.3)', width=1, dash='dash'),
+                name='Upper BB'
+            ))
+            
+            fig.add_trace(go.Scatter(
+                x=df[date_col], y=lower_bb,
+                line=dict(color='rgba(255, 255, 255, 0.3)', width=1, dash='dash'),
+                fill='tonexty', # Fill area between Upper and Lower
+                fillcolor='rgba(255, 255, 255, 0.05)',
+                name='Lower BB'
+            ))
+
+            # Add ATR Bands (1.5x)
+            try:
+                # Calculate ATR using pandas_ta
+                df.ta.atr(length=14, append=True)
+                # The column name generated is usually ATRe_14 or similar, finding it dynamically
+                atr_col = [c for c in df.columns if 'ATR' in c][0] 
+                atr = df[atr_col]
                 
-                # Include markers in range
-                markers = [
-                    trade_updates.get("entry", 0),
-                    trade_updates.get("stop_loss", 0),
-                    trade_updates.get("take_profit", 0),
-                    trade_updates.get("trailing_activation_price", 0)
-                ]
+                upper_atr = sma_20 + (atr * 1.5)
+                lower_atr = sma_20 - (atr * 1.5)
                 
-                for m in markers:
-                    if m and float(m) > 0:
-                        min_price = min(min_price, float(m))
-                        max_price = max(max_price, float(m))
+                fig.add_trace(go.Scatter(
+                    x=df[date_col], y=upper_atr,
+                    line=dict(color='cyan', width=1, dash='dot'),
+                    name='Upper ATR (1.5x)'
+                ))
+                fig.add_trace(go.Scatter(
+                    x=df[date_col], y=lower_atr,
+                    line=dict(color='cyan', width=1, dash='dot'),
+                    name='Lower ATR (1.5x)'
+                ))
+            except Exception as e:
+                print(f"Could not add ATR bands: {e}")
+
+            # Add Horizontal Lines (Entry, SL, TP)
+            entry = float(trade.get("entry", 0))
+            sl = float(trade.get("stop_loss", 0))
+            tp = float(trade.get("take_profit", 0) or 0) # Handle None
+
+            if entry > 0:
+                fig.add_hline(y=entry, line_dash="dash", line_color="green", annotation_text="Entry")
+            if sl > 0:
+                fig.add_hline(y=sl, line_dash="dash", line_color="orange", annotation_text="SL")
+            if tp > 0:
+                fig.add_hline(y=tp, line_dash="dash", line_color="purple", annotation_text="TP")
+
+            # Add Trailing Stop Trigger (1.5R)
+            if entry > 0 and sl > 0:
+                risk = abs(entry - sl)
+                action = trade.get("action", "").upper()
+                trigger_price = 0
                 
-                # Add padding (0.2%)
-                padding = (max_price - min_price) * 0.05
-                if padding == 0: padding = max_price * 0.01 # Fallback
+                if action == "BUY":
+                    trigger_price = entry + (1.5 * risk)
+                elif action == "SELL":
+                    trigger_price = entry - (1.5 * risk)
                 
-                trade_updates["graph_y_min"] = min_price - padding
-                trade_updates["graph_y_max"] = max_price + padding
-                self.selected_trade = trade_updates
+                if trigger_price > 0:
+                    fig.add_hline(
+                        y=trigger_price, 
+                        line_dash="dot", 
+                        line_color="cyan", 
+                        annotation_text="Trail Trigger (1.5R)",
+                        annotation_position="top left"
+                    )
+
+            # Add Vertical Lines (Entry Time, Exit Time)
+            # Plotly expects datetime objects or strings matching x-axis
+            fig.add_vline(x=entry_dt, line_dash="dot", line_color="green")
+            fig.add_vline(x=exit_dt, line_dash="dot", line_color="red")
+
+            # Layout Styling for Dark Mode
+            fig.update_layout(
+                template="plotly_dark",
+                margin=dict(l=20, r=20, t=20, b=20),
+                xaxis_rangeslider_visible=False,
+                height=400,
+                paper_bgcolor='rgba(0,0,0,0)', # Transparent background
+                plot_bgcolor='rgba(0,0,0,0)',
+            )
+            
+            self.chart_figure = fig
 
         except Exception as e:
-            print(f"Error fetching graph data: {e}")
-            self.candle_data = []
+            print(f"Error building graph: {e}")
         
+        self.is_loading_graph = False
+
+    def show_demo_chart(self):
+        """Generates a synthetic demo trade and chart for visualization."""
+        self.show_detail = True
+        self.is_loading_graph = True
+        self.chart_figure = go.Figure()
+        
+        # 1. Create Mock Trade
+        now = datetime.now()
+        entry_time = now - timedelta(hours=2)
+        exit_time = now - timedelta(minutes=30)
+        
+        mock_trade = {
+            "deal_id": "DEMO_123",
+            "epic": "DEMO.FTSE100",
+            "action": "BUY",
+            "entry": 7500,
+            "exit_price": 7535, # Added exit price
+            "stop_loss": 7480,
+            "take_profit": 7540,
+            "outcome": "WIN",
+            "pnl": 200.0,
+            "reasoning": "DEMO: Bullish breakout pattern on 5m timeframe.",
+            "timestamp": entry_time.isoformat(),
+            "exit_time": exit_time.isoformat(),
+            "entry_time_graph": entry_time.strftime("%H:%M"),
+            "exit_time_graph": exit_time.strftime("%H:%M"),
+            "trailing_activation_price": 7530, # Example trailing start
+            "graph_y_min": 7470,
+            "graph_y_max": 7560
+        }
+        self.selected_trade = mock_trade
+
+        # 2. Generate Synthetic OHLC Data
+        import random
+        data = []
+        current_price = 7490 # Start below entry
+        current_time = entry_time - timedelta(minutes=60)
+        
+        for i in range(40): # 40 candles of 5 mins = 3h 20m
+            # Random walk
+            change = random.uniform(-3, 5) 
+            open_p = current_price
+            close_p = current_price + change
+            high_p = max(open_p, close_p) + random.uniform(0, 2)
+            low_p = min(open_p, close_p) - random.uniform(0, 2)
+            
+            data.append({
+                "time": current_time,
+                "open": open_p,
+                "high": high_p,
+                "low": low_p,
+                "close": close_p
+            })
+            current_price = close_p
+            current_time += timedelta(minutes=5)
+
+        df = pd.DataFrame(data)
+
+        # 3. Build Plotly Figure
+        fig = go.Figure(data=[go.Candlestick(
+            x=df['time'],
+            open=df['open'],
+            high=df['high'],
+            low=df['low'],
+            close=df['close'],
+            name="DEMO.FTSE100"
+        )])
+
+        # Add Trend Line (SMA 10)
+        fig.add_trace(go.Scatter(
+            x=df['time'], 
+            y=df['close'].rolling(window=10).mean(), 
+            mode='lines', 
+            name='Trend (SMA 10)', 
+            line=dict(color='yellow', width=1.5)
+        ))
+
+        # Add Bollinger Bands
+        sma_20 = df['close'].rolling(window=20).mean()
+        std_20 = df['close'].rolling(window=20).std()
+        upper_bb = sma_20 + (std_20 * 2)
+        lower_bb = sma_20 - (std_20 * 2)
+
+        fig.add_trace(go.Scatter(
+            x=df['time'], y=upper_bb,
+            line=dict(color='rgba(255, 255, 255, 0.3)', width=1, dash='dash'),
+            name='Upper BB'
+        ))
+        
+        fig.add_trace(go.Scatter(
+            x=df['time'], y=lower_bb,
+            line=dict(color='rgba(255, 255, 255, 0.3)', width=1, dash='dash'),
+            fill='tonexty', 
+            fillcolor='rgba(255, 255, 255, 0.05)',
+            name='Lower BB'
+        ))
+
+        # Add ATR Bands (1.5x)
+        try:
+            df.ta.atr(length=14, append=True)
+            atr_col = [c for c in df.columns if 'ATR' in c][0]
+            atr = df[atr_col]
+            
+            upper_atr = sma_20 + (atr * 1.5)
+            lower_atr = sma_20 - (atr * 1.5)
+            
+            fig.add_trace(go.Scatter(
+                x=df['time'], y=upper_atr,
+                line=dict(color='cyan', width=1, dash='dot'),
+                name='Upper ATR (1.5x)'
+            ))
+            fig.add_trace(go.Scatter(
+                x=df['time'], y=lower_atr,
+                line=dict(color='cyan', width=1, dash='dot'),
+                name='Lower ATR (1.5x)'
+            ))
+        except Exception as e:
+            print(f"Could not add ATR bands to demo: {e}")
+
+        # Markers
+        fig.add_hline(y=mock_trade["entry"], line_dash="dash", line_color="green", annotation_text="Entry (7500)")
+        fig.add_hline(y=mock_trade["stop_loss"], line_dash="dash", line_color="orange", annotation_text="SL (7480)")
+        fig.add_hline(y=mock_trade["take_profit"], line_dash="dash", line_color="purple", annotation_text="TP (7540)")
+        
+        # Add Trailing Stop Trigger (1.5R)
+        risk = abs(mock_trade["entry"] - mock_trade["stop_loss"])
+        trigger_price = mock_trade["entry"] + (1.5 * risk) if mock_trade["action"] == "BUY" else mock_trade["entry"] - (1.5 * risk)
+        
+        fig.add_hline(
+            y=trigger_price, 
+            line_dash="dot", 
+            line_color="cyan", 
+            annotation_text="Trail Trigger (1.5R)",
+            annotation_position="top left"
+        )
+        
+        # Middle Line (between Entry and TP)
+        mid_line = (mock_trade["entry"] + mock_trade["take_profit"]) / 2
+        fig.add_hline(y=mid_line, line_dash="dot", line_color="white", annotation_text=f"Mid ({mid_line})")
+        
+        fig.add_vline(x=entry_time, line_dash="dot", line_color="green")
+        fig.add_vline(x=exit_time, line_dash="dot", line_color="red")
+
+        # Layout
+        fig.update_layout(
+            template="plotly_dark",
+            margin=dict(l=20, r=20, t=20, b=20),
+            xaxis_rangeslider_visible=False,
+            height=400,
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+        )
+        
+        self.chart_figure = fig
         self.is_loading_graph = False
 
     def close_detail(self):
         self.show_detail = False
+        self.is_fullscreen = False
 
 
 def status_badge(label: str, status: str) -> rx.Component:
@@ -288,7 +458,24 @@ def status_badge(label: str, status: str) -> rx.Component:
 def trade_detail_modal() -> rx.Component:
     return rx.dialog.root(
         rx.dialog.content(
-            rx.dialog.title("Trade Analysis"),
+            # Header Row
+            rx.hstack(
+                rx.dialog.title("Trade Analysis"),
+                rx.spacer(),
+                rx.button(
+                    rx.cond(State.is_fullscreen, rx.icon(tag="minimize-2"), rx.icon(tag="maximize-2")),
+                    on_click=State.toggle_fullscreen,
+                    variant="ghost",
+                    size="2"
+                ),
+                rx.dialog.close(
+                    rx.button(rx.icon(tag="x"), variant="ghost", size="2", on_click=State.close_detail),
+                ),
+                width="100%",
+                align_items="center",
+                margin_bottom="1em",
+            ),
+
             rx.dialog.description("Review trade execution and market context."),
             
             rx.vstack(
@@ -297,72 +484,53 @@ def trade_detail_modal() -> rx.Component:
                     rx.badge(State.selected_trade["action"], 
                              color_scheme=rx.cond(State.selected_trade["action"] == "BUY", "green", "red"),
                              size="3"),
-                    spacing="2"
+                    spacing="2",
+                    margin_bottom="1em",
                 ),
-                rx.text(f"Outcome: {State.selected_trade['outcome']}"),
-                rx.text(f"PnL: {State.selected_trade['pnl']}"),
-                rx.text(f"Entry: {State.selected_trade['entry']} | Exit: {State.selected_trade['exit_price']}"),
-                rx.text(f"Reasoning: {State.selected_trade['reasoning']}", size="1", color="gray"),
                 
-                rx.divider(),
+                # Use a grid for better layout of trade details
+                rx.grid(
+                    rx.text("Outcome:", font_weight="bold", text_align="right"),
+                    rx.text(State.selected_trade["outcome"], text_align="left"),
+                    
+                    rx.text("PnL:", font_weight="bold", text_align="right"),
+                    rx.text(State.selected_trade["pnl"], text_align="left"),
+                    
+                    rx.text("Entry:", font_weight="bold", text_align="right"),
+                    rx.text(f"{State.selected_trade['entry']} | Exit: {State.selected_trade['exit_price']}", text_align="left"),
+
+                    columns="2", 
+                    spacing_x="4", 
+                    spacing_y="2",
+                    width="100%", 
+                    max_width="500px", 
+                    margin_bottom="1em",
+                ),
+                
+                # Reasoning section
+                rx.vstack(
+                    rx.text("Reasoning:", font_weight="bold"),
+                    rx.text(State.selected_trade['reasoning'], size="1", color="gray"),
+                    align_items="flex-start",
+                    width="100%",
+                    margin_bottom="1em",
+                ),
+                
+                rx.divider(width="100%"), 
                 
                 rx.cond(
                     State.is_loading_graph,
                     rx.spinner(),
-                    rx.recharts.line_chart(
-                        rx.recharts.line(
-                            data_key="price",
-                            stroke="#8884d8",
-                            dot=False,
-                        ),
-                        rx.recharts.reference_line(
-                            y=State.selected_trade["entry"], 
-                            stroke="green", 
-                            label="Entry",
-                            stroke_dasharray="3 3"
-                        ),
-
-                        rx.recharts.reference_line(
-                            y=State.selected_trade["stop_loss"], 
-                            stroke="orange", 
-                            label="SL",
-                            stroke_dasharray="3 3"
-                        ),
-                        rx.recharts.reference_line(
-                            y=State.selected_trade["take_profit"], 
-                            stroke="purple", 
-                            label="TP",
-                            stroke_dasharray="3 3"
-                        ),
-                        rx.cond(
-                            State.selected_trade["trailing_activation_price"].to(float) > 0,
-                            rx.recharts.reference_line(
-                                y=State.selected_trade["trailing_activation_price"], 
-                                stroke="blue", 
-                                label="Trailing Start",
-                                stroke_dasharray="3 3"
-                            ),
-                        ),
-
-                        rx.recharts.reference_line(
-                            x=State.selected_trade["entry_time_graph"], 
-                            stroke="green", 
-                            stroke_dasharray="3 3"
-                        ),
-                        rx.recharts.reference_line(
-                            x=State.selected_trade["exit_time_graph"], 
-                            stroke="red", 
-                            stroke_dasharray="3 3"
-                        ),
-                        rx.recharts.x_axis(data_key="time", hide=True), # Hide X axis labels if too crowded
-                        rx.recharts.y_axis(domain=[State.selected_trade["graph_y_min"], State.selected_trade["graph_y_max"]]), # Auto scale with markers
-                        rx.recharts.tooltip(),
-                        data=State.candle_data,
-                        width="100%",
-                        height=300,
-                    )
+                    # Use rx.plotly for the chart
+                    rx.plotly(
+                        data=State.chart_figure, 
+                        height=rx.cond(State.is_fullscreen, "70vh", "400px"), 
+                        width="100%"
+                    ) 
                 ),
                 spacing="4",
+                align_items="flex-start",
+                width="100%",
             ),
             
             rx.flex(
@@ -370,15 +538,19 @@ def trade_detail_modal() -> rx.Component:
                     rx.button("Close", on_click=State.close_detail),
                 ),
                 justify="end",
-                margin_top="1em"
+                margin_top="1em",
             ),
+            max_width=rx.cond(State.is_fullscreen, "100vw", "90vw"),
+            width=rx.cond(State.is_fullscreen, "100vw", "auto"),
+            height=rx.cond(State.is_fullscreen, "100vh", "auto"),
+            padding="2em",
         ),
         open=State.show_detail,
         on_open_change=State.close_detail,
     )
 
 def index() -> rx.Component:
-    return rx.container(
+    return rx.box(
         trade_detail_modal(),
         rx.vstack(
             rx.heading("Gemini Trader Bot", size="8"),
@@ -390,8 +562,10 @@ def index() -> rx.Component:
                 rx.spacer(),
                 rx.text(f"Last Updated: {State.last_updated}", color="gray"),
                 rx.button("Refresh", on_click=State.load_data),
+                rx.button("Demo Chart", on_click=State.show_demo_chart, variant="surface", color_scheme="blue"),
+                spacing="2", # Ensure consistent spacing within hstack
                 width="100%",
-                align_items="center"
+                align_items="center", # Aligned to center for the whole hstack
             ),
             
             rx.divider(),
@@ -454,11 +628,10 @@ def index() -> rx.Component:
                 ),
                 width="100%"
             ),
-
-            spacing="4",
-            padding="2em",
+            spacing="4", # Place spacing as the last keyword argument of rx.vstack
         ),
-        max_width="1200px"
+        width="100%",
+        padding="2em",
     )
 
 app = rx.App(theme=rx.theme(appearance="dark"))
