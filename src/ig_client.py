@@ -1,6 +1,7 @@
 import time
 import logging
 import pandas as pd
+from typing import Optional
 from pathlib import Path
 from dotenv import dotenv_values
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
@@ -382,6 +383,35 @@ class IGClient:
             self.authenticate()
             
         return self.service.fetch_accounts()
+
+    def close_open_position(self, deal_id: Optional[str], direction: str, size: float, epic: Optional[str] = None, expiry: Optional[str] = "DFB"):
+        """
+        Closes an open position by placing an opposing market order.
+        In IG API, deal_id and (epic, expiry) are often mutually exclusive for closure.
+        """
+        if not self.authenticated:
+            self.authenticate()
+
+        if not deal_id and not epic:
+            raise ValueError("Either deal_id or epic must be provided to close a position.")
+
+        try:
+            logger.info(f"Attempting to CLOSE position: DealID={deal_id}, Epic={epic}, Dir={direction}, Size={size}")
+            response = self.service.close_open_position(
+                deal_id=deal_id,
+                direction=direction,
+                epic=epic,
+                expiry=expiry,
+                level=None,
+                order_type="MARKET",
+                quote_id=None,
+                size=size
+            )
+            logger.info(f"Close Position Response: {response}")
+            return response
+        except Exception as e:
+            logger.error(f"Failed to close position: {e}")
+            raise
 
     @retry(
         stop=stop_after_attempt(3),

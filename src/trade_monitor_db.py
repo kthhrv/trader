@@ -1,20 +1,23 @@
 import logging
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
+from typing import Dict, Optional
 from src.ig_client import IGClient
 from src.database import update_trade_outcome
 from src.stream_manager import StreamManager # New import
+from src.market_status import MarketStatus
 import threading # New import
 import json # New import
 
 logger = logging.getLogger(__name__)
 
 class TradeMonitorDB:
-    def __init__(self, client: IGClient, stream_manager: StreamManager, db_path=None, polling_interval: int = 5):
+    def __init__(self, client: IGClient, stream_manager: StreamManager, db_path=None, polling_interval: int = 5, market_status: Optional[MarketStatus] = None):
         self.client = client
         self.stream_manager = stream_manager
         self.db_path = db_path
         self.polling_interval = polling_interval # Polling interval for trailing stops if needed
+        self.market_status = market_status if market_status else MarketStatus()
         self._active_monitors: Dict[str, threading.Event] = {} # {deal_id: threading.Event}
         self._is_subscribed_to_trade_updates = False
 
@@ -116,11 +119,53 @@ class TradeMonitorDB:
         moved_to_breakeven = False
         risk_distance = abs(entry_price - stop_loss) if (entry_price and stop_loss) else 0
 
+        # Market Close Check Setup
+        try:
+            market_close_dt = self.market_status.get_market_close_datetime(epic)
+            logger.info(f"Market Close time for {epic}: {market_close_dt}")
+        except Exception as e:
+            logger.warning(f"Could not determine market close time for {epic}: {e}")
+            market_close_dt = None
+
         try:
             while not trade_closure_event.is_set():
                 if time.time() - start_time > max_duration:
                     logger.warning(f"Monitoring timed out for Deal ID: {deal_id} after {max_duration} seconds.")
                     break # Exit loop on timeout
+
+                # --- Market Close Time Check ---
+                if market_close_dt:
+                    now_tz = datetime.now(market_close_dt.tzinfo)
+                    time_to_close = market_close_dt - now_tz
+                    
+                    # If within 15 minutes (900 seconds) of close
+                    if timedelta(seconds=0) < time_to_close < timedelta(minutes=15):
+                        logger.warning(f"Market for {epic} closing in {time_to_close}. Forcing exit for {deal_id}.")
+                        try:
+                            # 1. Fetch current position to get size and direction
+                            pos = self.client.fetch_open_position_by_deal_id(deal_id)
+                            if pos:
+                                direction = pos.get('direction')
+                                size = float(pos.get('size', 0))
+                                expiry = pos.get('expiry', 'DFB')
+                                
+                                # Invert direction for closing
+                                close_direction = "SELL" if direction == "BUY" else "BUY"
+                                
+                                # 2. Execute Market Close
+                                # Use epic=None and expiry=None to avoid mutual-exclusive error in IG API
+                                self.client.close_open_position(deal_id, close_direction, size, epic=None, expiry=None)
+                                
+                                # Wait a moment for the stream to pick up the close event
+                                time.sleep(2)
+                                if trade_closure_event.is_set():
+                                    break
+                            else:
+                                logger.warning(f"Could not fetch position {deal_id} for forced exit. It may be already closed.")
+                                break # Assume closed if not found
+                        except Exception as e:
+                            logger.error(f"Failed to force close trade {deal_id} near market close: {e}")
+                # --- End Market Close Check ---
 
                 # --- Polling for Trailing Stop Logic (Still active in this loop) ---
                 if use_trailing_stop and risk_distance > 0:

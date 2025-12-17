@@ -3,19 +3,25 @@ from unittest.mock import patch, MagicMock
 import threading
 import time
 import json
+from datetime import datetime, timedelta, timezone
 from src.trade_monitor_db import TradeMonitorDB
+from src.market_status import MarketStatus
 
 class TestTradeMonitorDB(unittest.TestCase):
     
     def setUp(self):
         self.mock_client = MagicMock()
         self.mock_stream_manager = MagicMock() # Add mock stream_manager
-        self.monitor = TradeMonitorDB(self.mock_client, self.mock_stream_manager)
+        self.mock_market_status = MagicMock(spec=MarketStatus)
+        self.monitor = TradeMonitorDB(self.mock_client, self.mock_stream_manager, market_status=self.mock_market_status)
 
     @patch('src.trade_monitor_db.time.sleep') # Patch sleep to skip retry loop delays
     @patch('src.trade_monitor_db.update_trade_outcome')
     def test_monitor_trade_flow(self, mock_update_db, mock_sleep):
         deal_id = "DEAL123"
+        
+        # Disable market close check for this test
+        self.mock_market_status.get_market_close_datetime.return_value = None
         
         # Setup IG Client mock for PnL fetch
         mock_history_df = MagicMock()
@@ -114,6 +120,63 @@ class TestTradeMonitorDB(unittest.TestCase):
         
         # Verify the event IS set (monitoring stops)
         self.assertTrue(self.monitor._active_monitors[deal_id].is_set(), "Monitor event should be set on CLOSED status")
+
+    @patch('src.trade_monitor_db.time.sleep')
+    @patch('src.trade_monitor_db.update_trade_outcome')
+    def test_monitor_trade_forces_exit_near_market_close(self, mock_update_db, mock_sleep):
+        deal_id = "DEAL_CLOSE"
+        epic = "IX.D.FTSE.DAILY.IP"
+        
+        # Mock Market Status to return a time 2 minutes from "now"
+        # We need to ensure timezone awareness matches
+        tz = timezone.utc
+        now = datetime.now(tz)
+        close_time = now + timedelta(minutes=2)
+        
+        self.mock_market_status.get_market_close_datetime.return_value = close_time
+        
+        # Mock Open Position to return valid data for closing
+        self.mock_client.fetch_open_position_by_deal_id.return_value = {
+            'direction': 'BUY',
+            'size': 2.5,
+            'dealId': deal_id
+        }
+        
+        # Run monitor in a thread
+        monitor_thread = threading.Thread(
+            target=self.monitor.monitor_trade, 
+            args=(deal_id, epic), 
+            kwargs={'polling_interval': 0.1}
+        )
+        monitor_thread.start()
+        
+        # Wait enough time for the loop to run at least once and check time
+        # Since we patched sleep, it should cycle fast.
+        # We need to stop the thread after the check.
+        # The logic calls close_open_position then sleeps 2s then checks event.
+        # To terminate the test cleanly, we can set the event manually after a short delay
+        # OR we can verify the call happened and then set the event.
+        
+        start_wait = time.time()
+        call_found = False
+        while time.time() - start_wait < 2.0:
+            if self.mock_client.close_open_position.called:
+                call_found = True
+                break
+            time.sleep(0.1)
+            
+        # Signal the thread to exit
+        if deal_id in self.monitor._active_monitors:
+            self.monitor._active_monitors[deal_id].set()
+            
+        monitor_thread.join(timeout=1.0)
+        
+        self.assertTrue(call_found, "close_open_position was not called")
+        
+        # Verify arguments - epic and expiry should be None
+        self.mock_client.close_open_position.assert_called_with(
+            deal_id, "SELL", 2.5, epic=None, expiry=None
+        )
 
 
 if __name__ == '__main__':

@@ -148,3 +148,48 @@ def test_place_spread_bet_order_success(mock_ig_service):
     assert payload['stopLevel'] == 7450
     assert payload['currencyCode'] == 'GBP'
     assert payload['expiry'] == 'DFB'
+
+def test_close_open_position_success(mock_ig_service):
+    mock_instance = MagicMock()
+    mock_ig_service.return_value = mock_instance
+    
+    mock_instance.close_open_position.return_value = {'dealReference': 'CLOSE_REF'}
+    
+    client = IGClient()
+    client.authenticated = True
+    
+    response = client.close_open_position(
+        deal_id="DEAL123",
+        direction="SELL",
+        size=1,
+        epic="CS.D.FTSE.TODAY.IP"
+    )
+    
+    assert response['dealReference'] == 'CLOSE_REF'
+    mock_instance.close_open_position.assert_called_once_with(
+        deal_id="DEAL123",
+        direction="SELL",
+        epic="CS.D.FTSE.TODAY.IP",
+        expiry="DFB",
+        level=None,
+        order_type="MARKET",
+        quote_id=None,
+        size=1
+    )
+
+def test_close_open_position_fail(mock_ig_service):
+    mock_instance = MagicMock()
+    mock_ig_service.return_value = mock_instance
+    
+    mock_instance.close_open_position.side_effect = Exception("API Error")
+    
+    client = IGClient()
+    client.authenticated = True
+    
+    with pytest.raises(Exception, match="API Error"):
+        client.close_open_position(
+            deal_id="DEAL123",
+            direction="SELL",
+            size=1,
+            epic="CS.D.FTSE.TODAY.IP"
+        )
