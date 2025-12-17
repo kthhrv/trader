@@ -71,5 +71,50 @@ class TestTradeMonitorDB(unittest.TestCase):
         self.monitor._update_db("DEAL", 100, 50, "time", "CLOSED")
         mock_update_db.assert_called_once()
 
+    @patch('src.trade_monitor_db.logger')
+    def test_handle_trade_update_logs_and_continues(self, mock_logger):
+        deal_id = "DEAL123"
+        self.monitor._active_monitors[deal_id] = threading.Event()
+        
+        # Simulate UPDATED event
+        update_payload = json.dumps({
+            "dealId": deal_id,
+            "status": "UPDATED",
+            "level": 105.0,
+            "profitAndLoss": 50.5
+        })
+        
+        self.monitor._handle_trade_update({
+            'type': 'trade_update',
+            'payload': update_payload
+        })
+        
+        # Verify it logged the update
+        mock_logger.info.assert_any_call(f"STREAM: Trade {deal_id} detected as UPDATED via streaming update.")
+        
+        # Verify the event is NOT set (monitoring continues)
+        self.assertFalse(self.monitor._active_monitors[deal_id].is_set(), "Monitor event should not be set on UPDATED status")
+
+    def test_handle_trade_close_terminates(self):
+        deal_id = "DEAL123"
+        self.monitor._active_monitors[deal_id] = threading.Event()
+        
+        # Simulate CLOSED event
+        close_payload = json.dumps({
+            "dealId": deal_id,
+            "status": "CLOSED",
+            "level": 105.0,
+            "profitAndLoss": 50.5
+        })
+        
+        self.monitor._handle_trade_update({
+            'type': 'trade_update',
+            'payload': close_payload
+        })
+        
+        # Verify the event IS set (monitoring stops)
+        self.assertTrue(self.monitor._active_monitors[deal_id].is_set(), "Monitor event should be set on CLOSED status")
+
+
 if __name__ == '__main__':
     unittest.main()

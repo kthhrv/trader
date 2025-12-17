@@ -82,26 +82,15 @@ class TradeMonitorDB:
              logger.info(f"STREAM: Trade {monitored_id} detected as CLOSED via CONFIRMS (AffectedDeal).")
              self._active_monitors[monitored_id].set()
 
-        elif trade_status == "UPDATED":
-            logger.info(f"STREAM: Trade {deal_id} detected as CLOSED via streaming update.")
-            
-            # Extract PnL and exit price from payload if available
-            pnl = float(payload.get('profitAndLoss', 0.0)) # Example, adjust key as per actual payload
-            exit_price = float(payload.get('level', 0.0)) # 'level' or 'closeLevel' in confirms
-
-            # Signal that monitoring can stop for this trade
-            self._active_monitors[deal_id].set()
-
-            # The main monitor_trade loop will pick up from here, log to DB and clean up.
-            # We don't update DB directly here, but let the blocking monitor_trade do it
-            # to ensure proper flow and avoid race conditions with its state.
 
         elif trade_status == "UPDATED":
             logger.info(f"STREAM: Trade {deal_id} detected as UPDATED via streaming update.")
             # This could be a stop/limit update. Trailing stop logic handles this.
             # No need to set the event, trade is still active.
+
         else:
             logger.debug(f"STREAM: Unhandled trade status for {deal_id}: {trade_status} - {payload}")
+
 
 
     def monitor_trade(self, deal_id: str, epic: str, entry_price: float = None, stop_loss: float = None, atr: float = None, polling_interval: int = None, max_duration: int = 14400, use_trailing_stop: bool = True):
