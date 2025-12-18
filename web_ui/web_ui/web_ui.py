@@ -12,14 +12,29 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"
 from src.database import fetch_recent_trades
 from src.market_status import MarketStatus
 from src.ig_client import IGClient
+from src.scorecard import get_scorecard_data
 
 class State(rx.State):
     """The app state."""
     trades: list[dict] = []
     pnl_history: list[dict] = []
+    
+    # Market Status
     uk_status: str = "Checking..."
     us_status: str = "Checking..."
     jp_status: str = "Checking..."
+    de_status: str = "Checking..."
+    au_status: str = "Checking..."
+    ndx_status: str = "Checking..."
+    
+    # Scorecard Stats
+    win_rate: float = 0.0
+    profit_factor: float = 0.0
+    total_trades: int = 0
+    net_pnl: float = 0.0
+    conversion_rate: float = 0.0
+    market_breakdown: list[dict] = []
+
     last_updated: str = ""
 
     # Trade Detail & Graph State
@@ -49,9 +64,8 @@ class State(rx.State):
             self.trades = processed_trades
 
             # Process trades for Graph (Sort Oldest -> Newest)
-            # Filter out trades with no PnL (open trades or errors)
             valid_trades = [t for t in raw_trades if t.get("pnl") is not None and isinstance(t.get("pnl"), (int, float))]
-            valid_trades.sort(key=lambda x: x["timestamp"]) # Sort chronological
+            valid_trades.sort(key=lambda x: x["timestamp"])
 
             cumulative_pnl = 0.0
             history = []
@@ -64,8 +78,19 @@ class State(rx.State):
                 })
             self.pnl_history = history
 
+            # Load Scorecard Data
+            stats = get_scorecard_data()
+            if stats:
+                self.win_rate = round(stats["win_rate"], 1)
+                self.profit_factor = round(stats["profit_factor"], 2)
+                self.total_trades = stats["total_trades"]
+                self.net_pnl = round(stats["net_pnl"], 2)
+                if stats["total_sessions"] > 0:
+                    self.conversion_rate = round((stats["total_trades"] / stats["total_sessions"]) * 100, 1)
+                self.market_breakdown = stats["market_stats"]
+
         except Exception as e:
-            print(f"Error fetching trades: {e}")
+            print(f"Error fetching data: {e}")
             self.trades = []
             self.pnl_history = []
 
@@ -74,6 +99,9 @@ class State(rx.State):
         self.uk_status = ms.get_market_status("IX.D.FTSE.DAILY.IP")
         self.us_status = ms.get_market_status("IX.D.SPTRD.DAILY.IP")
         self.jp_status = ms.get_market_status("IX.D.NIKKEI.DAILY.IP")
+        self.de_status = ms.get_market_status("IX.D.DAX.DAILY.IP")
+        self.au_status = ms.get_market_status("IX.D.ASX.DAILY.IP")
+        self.ndx_status = ms.get_market_status("IX.D.NASDAQ.DAILY.IP")
         
         self.last_updated = datetime.now().strftime("%H:%M:%S")
 
@@ -555,17 +583,40 @@ def index() -> rx.Component:
         rx.vstack(
             rx.heading("Gemini Trader Bot", size="8"),
             
+            rx.grid(
+                status_badge("London", State.uk_status),
+                status_badge("Germany", State.de_status),
+                status_badge("Nikkei", State.jp_status),
+                status_badge("NY (S&P)", State.us_status),
+                status_badge("US Tech", State.ndx_status),
+                status_badge("Australia", State.au_status),
+                columns="6",
+                spacing="2",
+                width="100%",
+            ),
+
             rx.hstack(
-                status_badge("London (FTSE)", State.uk_status),
-                status_badge("New York (S&P)", State.us_status),
-                status_badge("Tokyo (Nikkei)", State.jp_status),
                 rx.spacer(),
                 rx.text(f"Last Updated: {State.last_updated}", color="gray"),
                 rx.button("Refresh", on_click=State.load_data),
                 rx.button("Demo Chart", on_click=State.show_demo_chart, variant="surface", color_scheme="blue"),
-                spacing="2", # Ensure consistent spacing within hstack
+                spacing="2",
                 width="100%",
-                align_items="center", # Aligned to center for the whole hstack
+                align_items="center",
+            ),
+            
+            rx.divider(),
+
+            rx.heading("Performance Scorecard", size="5"),
+            rx.grid(
+                rx.card(rx.vstack(rx.text("Net PnL", size="1"), rx.heading(f"£{State.net_pnl}", size="6", color=rx.cond(State.net_pnl >= 0, "green", "red")))),
+                rx.card(rx.vstack(rx.text("Win Rate", size="1"), rx.heading(f"{State.win_rate}%", size="6"))),
+                rx.card(rx.vstack(rx.text("Profit Factor", size="1"), rx.heading(State.profit_factor.to_string(), size="6"))),
+                rx.card(rx.vstack(rx.text("Total Trades", size="1"), rx.heading(State.total_trades.to_string(), size="6"))),
+                rx.card(rx.vstack(rx.text("AI Conv. Rate", size="1"), rx.heading(f"{State.conversion_rate}%", size="6"))),
+                columns="5",
+                spacing="2",
+                width="100%",
             ),
             
             rx.divider(),
