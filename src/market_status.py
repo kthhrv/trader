@@ -50,6 +50,7 @@ class MarketStatus:
     def is_holiday(self, epic: str) -> bool:
         """
         Determines if the market associated with the epic is closed due to a holiday.
+        Checks the holiday status for the date in the MARKET'S timezone, not local time.
 
         Args:
             epic (str): The instrument epic (e.g., "IX.D.FTSE.DAILY.IP").
@@ -57,44 +58,56 @@ class MarketStatus:
         Returns:
             bool: True if it is a holiday, False otherwise.
         """
-        current_date = date.today()
         country_code = self._get_country_code(epic)
 
         if not country_code:
             logger.warning(f"Unknown market for epic {epic}. Assuming open.")
             return False
 
+        # Determine the date in the target market's timezone
+        # This handles the case where it's Monday night in UK but Tuesday morning in AU/JP
+        schedule = self._get_market_hours(epic)
+        tz_name = schedule.get("timezone", "UTC")
+        try:
+            tz = pytz.timezone(tz_name)
+            target_date = datetime.now(tz).date()
+        except Exception as e:
+            logger.warning(
+                f"Timezone conversion failed for {epic} ({tz_name}): {e}. Using local date."
+            )
+            target_date = date.today()
+
         is_hol = False
         holiday_name = None
 
         if country_code == "UK":
-            if current_date in self.uk_holidays:
+            if target_date in self.uk_holidays:
                 is_hol = True
-                holiday_name = self.uk_holidays.get(current_date)
+                holiday_name = self.uk_holidays.get(target_date)
         elif country_code == "US":
-            if current_date in self.us_holidays:
+            if target_date in self.us_holidays:
                 is_hol = True
-                holiday_name = self.us_holidays.get(current_date)
+                holiday_name = self.us_holidays.get(target_date)
         elif country_code == "JP":
-            if current_date in self.jp_holidays:
+            if target_date in self.jp_holidays:
                 is_hol = True
-                holiday_name = self.jp_holidays.get(current_date)
+                holiday_name = self.jp_holidays.get(target_date)
         elif country_code == "DE":
             # For now, default German holidays to False unless a specific library is used
             is_hol = False
             holiday_name = "German Public Holiday (Not checked)"
         elif country_code == "AU":
-            if current_date in self.au_holidays:
+            if target_date in self.au_holidays:
                 is_hol = True
-                holiday_name = self.au_holidays.get(current_date)
+                holiday_name = self.au_holidays.get(target_date)
 
         if is_hol:
             logger.info(
-                f"Market {country_code} is CLOSED today ({current_date}) for {holiday_name if holiday_name else 'Public Holiday'}. Trading skipped."
+                f"Market {country_code} is CLOSED on {target_date} for {holiday_name if holiday_name else 'Public Holiday'}. Trading skipped."
             )
             return True
         else:
-            # logger.info(f"Market {country_code} is OPEN today ({current_date}).") # Too verbose for regular logging
+            # logger.info(f"Market {country_code} is OPEN on {target_date}.")
             return False
 
     def get_market_status(self, epic: str) -> str:
