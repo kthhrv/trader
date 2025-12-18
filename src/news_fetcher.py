@@ -1,14 +1,16 @@
 import feedparser
 import logging
-from typing import List, Dict
 from urllib.parse import quote
 
 logger = logging.getLogger(__name__)
 
+
 class NewsFetcher:
     def __init__(self):
         # Google News RSS
-        self.google_base_url = "https://news.google.com/rss/search?q={query}&hl=en-GB&gl=GB&ceid=GB:en"
+        self.google_base_url = (
+            "https://news.google.com/rss/search?q={query}&hl=en-GB&gl=GB&ceid=GB:en"
+        )
         # Yahoo Finance RSS
         self.yahoo_base_url = "https://finance.yahoo.com/rss/headline?s={symbol}"
 
@@ -29,14 +31,16 @@ class NewsFetcher:
             formatted_url = self.google_base_url.format(query=quote(google_query))
             logger.info(f"Fetching Google news for: '{google_query}'")
             feed = feedparser.parse(formatted_url)
-            
+
             if feed.entries:
                 news_summary += "Source: Google News\n"
                 for entry in feed.entries[:limit]:
                     title = entry.title
                     if title not in seen_titles:
-                        published = entry.published if 'published' in entry else "Unknown Date"
-                        news_summary += f"{count+1}. [{published}] {title}\n"
+                        published = (
+                            entry.published if "published" in entry else "Unknown Date"
+                        )
+                        news_summary += f"{count + 1}. [{published}] {title}\n"
                         seen_titles.add(title)
                         count += 1
         except Exception as e:
@@ -49,14 +53,18 @@ class NewsFetcher:
                 formatted_url = self.yahoo_base_url.format(symbol=yahoo_symbol)
                 logger.info(f"Fetching Yahoo news for: '{yahoo_symbol}'")
                 feed = feedparser.parse(formatted_url)
-                
+
                 if feed.entries:
                     news_summary += f"\nSource: Yahoo Finance ({yahoo_symbol})\n"
                     for entry in feed.entries[:limit]:
                         title = entry.title
                         if title not in seen_titles:
-                            published = entry.published if 'published' in entry else "Unknown Date"
-                            news_summary += f"{count+1}. [{published}] {title}\n"
+                            published = (
+                                entry.published
+                                if "published" in entry
+                                else "Unknown Date"
+                            )
+                            news_summary += f"{count + 1}. [{published}] {title}\n"
                             seen_titles.add(title)
                             count += 1
             except Exception as e:
@@ -89,6 +97,7 @@ class NewsFetcher:
         elif "asx" in q or "australia" in q:
             return "^AXJO"
         return None
+
 
 if __name__ == "__main__":
     # Manual Test

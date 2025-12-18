@@ -1,4 +1,3 @@
-import os
 from google import genai
 from google.genai import types
 import typing_extensions as typing
@@ -9,58 +8,74 @@ import pandas as pd
 from config import GEMINI_API_KEY
 
 
-
 class Action(str, Enum):
     BUY = "BUY"
     SELL = "SELL"
     WAIT = "WAIT"
 
+
 class EntryType(str, Enum):
     INSTANT = "INSTANT"
     CONFIRMATION = "CONFIRMATION"
 
+
 class NewsQuality(BaseModel):
-    score: int = Field(description="Quality score from 0 (useless) to 10 (highly actionable).")
-    relevance: str = Field(description="Assessment of how relevant the news is to the specific market.")
-    sentiment_clarity: str = Field(description="How clear the sentiment is (High/Medium/Low).")
+    score: int = Field(
+        description="Quality score from 0 (useless) to 10 (highly actionable)."
+    )
+    relevance: str = Field(
+        description="Assessment of how relevant the news is to the specific market."
+    )
+    sentiment_clarity: str = Field(
+        description="How clear the sentiment is (High/Medium/Low)."
+    )
     reasoning: str = Field(description="Brief explanation of the score.")
 
-class TradingSignal(BaseModel):
 
+class TradingSignal(BaseModel):
     ticker: str = Field(description="The ticker symbol of the asset analyzed.")
 
     action: Action = Field(description="The trading action recommendation.")
 
     entry: float = Field(description="The suggested entry price level.")
-    
-    entry_type: EntryType = Field(description="The type of entry: 'INSTANT' (execute immediately when price touches level) or 'CONFIRMATION' (wait for 1-minute candle close beyond level). Default to INSTANT for high momentum, CONFIRMATION for risky setups.")
+
+    entry_type: EntryType = Field(
+        description="The type of entry: 'INSTANT' (execute immediately when price touches level) or 'CONFIRMATION' (wait for 1-minute candle close beyond level). Default to INSTANT for high momentum, CONFIRMATION for risky setups."
+    )
 
     stop_loss: float = Field(description="The stop loss price level.")
 
-    take_profit: typing.Optional[float] = Field(description="The take profit price level. Can be null if using a trailing stop for uncapped wins.")
+    take_profit: typing.Optional[float] = Field(
+        description="The take profit price level. Can be null if using a trailing stop for uncapped wins."
+    )
 
     size: float = Field(description="The suggested trade size per point.")
 
-    atr: float = Field(description="The Average True Range (ATR) at the time of analysis.")
+    atr: float = Field(
+        description="The Average True Range (ATR) at the time of analysis."
+    )
 
-    use_trailing_stop: bool = Field(description="Whether to use a dynamic trailing stop (True) or a fixed take profit (False). Set to True for breakout/trend strategies to maximize runs. Set to False for range/mean-reversion strategies where price is expected to reverse at target.")
+    use_trailing_stop: bool = Field(
+        description="Whether to use a dynamic trailing stop (True) or a fixed take profit (False). Set to True for breakout/trend strategies to maximize runs. Set to False for range/mean-reversion strategies where price is expected to reverse at target."
+    )
 
-    confidence: str = Field(description="Confidence level of the analysis (e.g., 'high', 'medium', 'low').")
+    confidence: str = Field(
+        description="Confidence level of the analysis (e.g., 'high', 'medium', 'low')."
+    )
 
-    reasoning: str = Field(description="Brief explanation of the trade rationale based on technicals.")
-
+    reasoning: str = Field(
+        description="Brief explanation of the trade rationale based on technicals."
+    )
 
 
 class GeminiAnalyst:
-
     def __init__(self, model_name: str = "gemini-3-pro-preview"):
-
         """
         Initializes the Gemini Analyst with a Vertex AI model, using the google-genai SDK.
         """
 
         self.model_name = model_name
-        
+
         # Initialize the client directly
         self.client = genai.Client(api_key=GEMINI_API_KEY)
 
@@ -87,40 +102,43 @@ class GeminiAnalyst:
             7. After the Chain-of-Thought, your final output MUST be strictly in the requested JSON format, and ONLY the JSON. Ensure the 'atr' field reflects the current ATR value provided in the market context.
             """
 
-
-
-    def analyze_market(self, market_data_context: str, strategy_name: str = "Market Open") -> typing.Optional[TradingSignal]:
-
+    def analyze_market(
+        self, market_data_context: str, strategy_name: str = "Market Open"
+    ) -> typing.Optional[TradingSignal]:
         """
         Sends market data to Gemini and returns a structured TradingSignal.
         """
         try:
             prompt = f"It's 20 minutes before Market Open, Develop a trading strategy for the {strategy_name} based on the following market data, and provide a trading signal:\n\n{market_data_context}"
-            
+
             response = self.client.models.generate_content(
                 model=self.model_name,
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     system_instruction=self.system_instruction,
                     response_mime_type="application/json",
-                    response_schema=TradingSignal.model_json_schema()
-                )
+                    response_schema=TradingSignal.model_json_schema(),
+                ),
             )
-            
+
             # The SDK with response_schema automatically handles the schema enforcement
             signal_data = json.loads(response.text)
             # Handle potential missing entry_type from older models or if omitted (default fallback)
-            if 'entry_type' not in signal_data:
-                signal_data['entry_type'] = EntryType.INSTANT
-            if 'use_trailing_stop' not in signal_data:
-                signal_data['use_trailing_stop'] = True # Default to True (original behavior)
+            if "entry_type" not in signal_data:
+                signal_data["entry_type"] = EntryType.INSTANT
+            if "use_trailing_stop" not in signal_data:
+                signal_data["use_trailing_stop"] = (
+                    True  # Default to True (original behavior)
+                )
             return TradingSignal(**signal_data)
 
         except Exception as e:
             print(f"Error during Gemini analysis: {e}")
             return None
 
-    def assess_news_quality(self, news_text: str, market_name: str) -> typing.Optional[NewsQuality]:
+    def assess_news_quality(
+        self, news_text: str, market_name: str
+    ) -> typing.Optional[NewsQuality]:
         """
         Asks Gemini to rate the quality and relevance of the fetched news for a specific market.
         """
@@ -141,44 +159,54 @@ class GeminiAnalyst:
             News Content:
             {news_text}
             """
-            
+
             response = self.client.models.generate_content(
                 model=self.model_name,
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json",
-                    response_schema=NewsQuality.model_json_schema()
-                )
+                    response_schema=NewsQuality.model_json_schema(),
+                ),
             )
-            
+
             return NewsQuality(**json.loads(response.text))
-            
+
         except Exception as e:
             print(f"Error during news assessment: {e}")
             return None
 
-    def generate_post_mortem(self, trade_data: dict, price_history_df: pd.DataFrame = None) -> str:
+    def generate_post_mortem(
+        self, trade_data: dict, price_history_df: pd.DataFrame = None
+    ) -> str:
         """
         Generates a post-mortem analysis for a completed trade.
         """
-        log = trade_data.get('log', {})
-        monitor = trade_data.get('monitor', [])
-        
+        log = trade_data.get("log", {})
+        monitor = trade_data.get("monitor", [])
+
         # Summarize monitoring data with fallbacks from log
         if monitor:
-            start_price = monitor[0]['bid']
-            end_price = monitor[-1]['bid']
-            min_pnl = min((row['pnl'] for row in monitor), default=0)
-            max_pnl = max((row['pnl'] for row in monitor), default=0)
-            final_pnl = monitor[-1]['pnl']
+            start_price = monitor[0]["bid"]
+            end_price = monitor[-1]["bid"]
+            min_pnl = min((row["pnl"] for row in monitor), default=0)
+            max_pnl = max((row["pnl"] for row in monitor), default=0)
+            final_pnl = monitor[-1]["pnl"]
         else:
             # Fallback to trade_log data if monitoring data is missing
-            start_price = log.get('entry', "N/A")
-            end_price = log.get('exit_price', "N/A")
-            final_pnl = log.get('pnl', "N/A")
+            start_price = log.get("entry", "N/A")
+            end_price = log.get("exit_price", "N/A")
+            final_pnl = log.get("pnl", "N/A")
             # We can't know min/max pnl range without tick data, so we imply it from final
-            min_pnl = final_pnl if isinstance(final_pnl, (int, float)) and final_pnl < 0 else 0
-            max_pnl = final_pnl if isinstance(final_pnl, (int, float)) and final_pnl > 0 else 0
+            min_pnl = (
+                final_pnl
+                if isinstance(final_pnl, (int, float)) and final_pnl < 0
+                else 0
+            )
+            max_pnl = (
+                final_pnl
+                if isinstance(final_pnl, (int, float)) and final_pnl > 0
+                else 0
+            )
 
         price_history_context = ""
         if price_history_df is not None and not price_history_df.empty:
@@ -188,13 +216,13 @@ class GeminiAnalyst:
                 # Ensure index is datetime
                 if not isinstance(price_history_df.index, pd.DatetimeIndex):
                     price_history_df.index = pd.to_datetime(price_history_df.index)
-                
+
                 # Simple summary statistics
-                period_high = price_history_df['high'].max()
-                period_low = price_history_df['low'].min()
-                period_open = price_history_df['open'].iloc[0]
-                period_close = price_history_df['close'].iloc[-1]
-                
+                period_high = price_history_df["high"].max()
+                period_low = price_history_df["low"].min()
+                period_open = price_history_df["open"].iloc[0]
+                period_close = price_history_df["close"].iloc[-1]
+
                 price_history_context = f"""
         **Broader Market Context (1H before to Present):**
         - Period High: {period_high}
@@ -202,7 +230,7 @@ class GeminiAnalyst:
         - Open: {period_open}
         - Close: {period_close}
         - Candle Data (Last 20 5-min bars):
-        {price_history_df.resample('5Min').agg({'open':'first', 'high':'max', 'low':'min', 'close':'last'}).tail(20).to_string()}
+        {price_history_df.resample("5Min").agg({"open": "first", "high": "max", "low": "min", "close": "last"}).tail(20).to_string()}
         """
             except Exception as e:
                 price_history_context = f"Could not process price history: {e}"
@@ -211,16 +239,16 @@ class GeminiAnalyst:
         You are a senior trading risk manager conducting a post-mortem analysis.
         
         **Trade Plan:**
-        - Ticker: {log.get('epic')}
-        - Action: {log.get('action')}
-        - Planned Entry: {log.get('entry')}
-        - Planned Stop: {log.get('stop_loss')}
-        - Planned TP: {log.get('take_profit')}
-        - Reasoning: {log.get('reasoning')}
+        - Ticker: {log.get("epic")}
+        - Action: {log.get("action")}
+        - Planned Entry: {log.get("entry")}
+        - Planned Stop: {log.get("stop_loss")}
+        - Planned TP: {log.get("take_profit")}
+        - Reasoning: {log.get("reasoning")}
         
         **Execution & Outcome:**
-        - Outcome: {log.get('outcome')}
-        - Spread at Entry: {log.get('spread_at_entry')}
+        - Outcome: {log.get("outcome")}
+        - Spread at Entry: {log.get("spread_at_entry")}
         - Start Price (Bid): {start_price}
         - End Price (Bid): {end_price}
         - PnL Range: {min_pnl} to {max_pnl}
@@ -242,66 +270,60 @@ class GeminiAnalyst:
         
         Provide a concise, bulleted report.
         """
-        
+
         try:
             # Create config with safety settings
             # Using dictionary format which is often supported, or referencing types if needed.
             # For google-genai, usage of types is preferred.
-            
+
             safety_settings = [
                 types.SafetySetting(
-                    category="HARM_CATEGORY_HARASSMENT",
-                    threshold="BLOCK_NONE"
+                    category="HARM_CATEGORY_HARASSMENT", threshold="BLOCK_NONE"
                 ),
                 types.SafetySetting(
-                    category="HARM_CATEGORY_HATE_SPEECH",
-                    threshold="BLOCK_NONE"
+                    category="HARM_CATEGORY_HATE_SPEECH", threshold="BLOCK_NONE"
                 ),
                 types.SafetySetting(
-                    category="HARM_CATEGORY_SEXUALLY_EXPLICIT",
-                    threshold="BLOCK_NONE"
+                    category="HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold="BLOCK_NONE"
                 ),
                 types.SafetySetting(
-                    category="HARM_CATEGORY_DANGEROUS_CONTENT",
-                    threshold="BLOCK_NONE"
+                    category="HARM_CATEGORY_DANGEROUS_CONTENT", threshold="BLOCK_NONE"
                 ),
             ]
-            
+
             config = types.GenerateContentConfig(
-                temperature=0.2,
-                max_output_tokens=8192,
-                safety_settings=safety_settings
+                temperature=0.2, max_output_tokens=8192, safety_settings=safety_settings
             )
-            
+
             response = self.client.models.generate_content(
-                model=self.model_name,
-                contents=prompt, 
-                config=config
+                model=self.model_name, contents=prompt, config=config
             )
-            
+
             # Safely access text
             if response.candidates:
                 candidate = response.candidates[0]
                 if candidate.content and candidate.content.parts:
                     return response.text
-                elif candidate.finish_reason == types.FinishReason.SAFETY: # SAFETY
+                elif candidate.finish_reason == types.FinishReason.SAFETY:  # SAFETY
                     return f"Analysis blocked by safety filters. Ratings: {candidate.safety_ratings}"
-                elif candidate.finish_reason == types.FinishReason.MAX_TOKENS: # MAX_TOKENS
+                elif (
+                    candidate.finish_reason == types.FinishReason.MAX_TOKENS
+                ):  # MAX_TOKENS
                     try:
                         return response.text + "\n[TRUNCATED]"
-                    except:
+                    except Exception:
                         return "Analysis truncated and text inaccessible."
                 else:
                     return f"Analysis finished with reason {candidate.finish_reason} but no text returned."
             else:
                 return "No candidates returned from Gemini."
-            
+
         except Exception as e:
             print(f"Gemini Post-Mortem Error: {e}")
             return "Analysis failed."
 
-if __name__ == "__main__":
 
+if __name__ == "__main__":
     # Simple manual test (requires valid API key in .env)
 
     # Mock data example
@@ -318,7 +340,6 @@ if __name__ == "__main__":
     """
 
     if GEMINI_API_KEY:
-
         analyst = GeminiAnalyst()
 
         result = analyst.analyze_market(mock_data)
@@ -328,5 +349,4 @@ if __name__ == "__main__":
         print(result.model_dump_json(indent=2) if result else "Failed")
 
     else:
-
         print("Skipping manual test: No GEMINI_API_KEY found.")

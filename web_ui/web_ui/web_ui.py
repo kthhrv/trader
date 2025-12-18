@@ -2,9 +2,8 @@ import reflex as rx
 import sys
 import os
 import pandas as pd
-import pandas_ta as ta
 from datetime import datetime, timedelta
-import plotly.graph_objects as go # Import Plotly
+import plotly.graph_objects as go  # Import Plotly
 
 # Add parent directory to path to import src
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../")))
@@ -14,11 +13,13 @@ from src.market_status import MarketStatus
 from src.ig_client import IGClient
 from src.scorecard import get_scorecard_data
 
+
 class State(rx.State):
     """The app state."""
+
     trades: list[dict] = []
     pnl_history: list[dict] = []
-    
+
     # Market Status
     uk_status: str = "Checking..."
     us_status: str = "Checking..."
@@ -26,7 +27,7 @@ class State(rx.State):
     de_status: str = "Checking..."
     au_status: str = "Checking..."
     ndx_status: str = "Checking..."
-    
+
     # Scorecard Stats
     win_rate: float = 0.0
     profit_factor: float = 0.0
@@ -39,7 +40,7 @@ class State(rx.State):
 
     # Trade Detail & Graph State
     selected_trade: dict = {}
-    chart_figure: go.Figure = go.Figure() # Plotly Figure State
+    chart_figure: go.Figure = go.Figure()  # Plotly Figure State
     show_detail: bool = False
     is_loading_graph: bool = False
     graph_cache: dict = {}
@@ -47,7 +48,7 @@ class State(rx.State):
 
     class Config:
         arbitrary_types_allowed = True
-        
+
     def toggle_fullscreen(self):
         self.is_fullscreen = not self.is_fullscreen
 
@@ -55,7 +56,7 @@ class State(rx.State):
         """Fetch data from the database and update market status."""
         try:
             raw_trades = fetch_recent_trades(limit=50)
-            
+
             # Process trades for Table (Keep original order: newest first)
             processed_trades = []
             for t in raw_trades:
@@ -64,18 +65,24 @@ class State(rx.State):
             self.trades = processed_trades
 
             # Process trades for Graph (Sort Oldest -> Newest)
-            valid_trades = [t for t in raw_trades if t.get("pnl") is not None and isinstance(t.get("pnl"), (int, float))]
+            valid_trades = [
+                t
+                for t in raw_trades
+                if t.get("pnl") is not None and isinstance(t.get("pnl"), (int, float))
+            ]
             valid_trades.sort(key=lambda x: x["timestamp"])
 
             cumulative_pnl = 0.0
             history = []
             for t in valid_trades:
                 cumulative_pnl += t["pnl"]
-                history.append({
-                    "date": t["timestamp"], 
-                    "pnl": t["pnl"], 
-                    "cumulative_pnl": round(cumulative_pnl, 2)
-                })
+                history.append(
+                    {
+                        "date": t["timestamp"],
+                        "pnl": t["pnl"],
+                        "cumulative_pnl": round(cumulative_pnl, 2),
+                    }
+                )
             self.pnl_history = history
 
             # Load Scorecard Data
@@ -86,7 +93,9 @@ class State(rx.State):
                 self.total_trades = stats["total_trades"]
                 self.net_pnl = round(stats["net_pnl"], 2)
                 if stats["total_sessions"] > 0:
-                    self.conversion_rate = round((stats["total_trades"] / stats["total_sessions"]) * 100, 1)
+                    self.conversion_rate = round(
+                        (stats["total_trades"] / stats["total_sessions"]) * 100, 1
+                    )
                 self.market_breakdown = stats["market_stats"]
 
         except Exception as e:
@@ -102,7 +111,7 @@ class State(rx.State):
         self.de_status = ms.get_market_status("IX.D.DAX.DAILY.IP")
         self.au_status = ms.get_market_status("IX.D.ASX.DAILY.IP")
         self.ndx_status = ms.get_market_status("IX.D.NASDAQ.DAILY.IP")
-        
+
         self.last_updated = datetime.now().strftime("%H:%M:%S")
 
     def open_trade_detail(self, trade: dict):
@@ -110,8 +119,8 @@ class State(rx.State):
         self.selected_trade = trade
         self.show_detail = True
         self.is_loading_graph = True
-        self.chart_figure = go.Figure() # Reset figure
-        
+        self.chart_figure = go.Figure()  # Reset figure
+
         try:
             # Parse timestamps
             entry_ts_str = trade.get("timestamp")
@@ -122,7 +131,7 @@ class State(rx.State):
                 return
 
             entry_dt = datetime.fromisoformat(entry_ts_str)
-            
+
             if exit_ts_str and exit_ts_str != "":
                 try:
                     exit_dt = datetime.fromisoformat(exit_ts_str)
@@ -146,31 +155,37 @@ class State(rx.State):
 
             # Format for IG API
             fmt = "%Y-%m-%d %H:%M:%S"
-            
+
             # Use IGClient
-            client = IGClient() 
+            client = IGClient()
             epic = trade.get("epic")
-            
+
             # --- Caching Implementation ---
-            cache_dir = os.path.join(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../")), "data", "cache")
+            cache_dir = os.path.join(
+                os.path.abspath(os.path.join(os.path.dirname(__file__), "../../")),
+                "data",
+                "cache",
+            )
             os.makedirs(cache_dir, exist_ok=True)
-            
+
             # Create a filesystem-safe filename
             safe_epic = epic.replace(".", "_").replace(":", "")
             cache_filename = f"{safe_epic}_{resolution}_{start_dt.strftime('%Y%m%d%H%M')}_{end_dt.strftime('%Y%m%d%H%M')}.csv"
             cache_path = os.path.join(cache_dir, cache_filename)
 
             df = pd.DataFrame()
-            
+
             if os.path.exists(cache_path):
                 print(f"DEBUG: Cache HIT. Loading from {cache_path}")
                 try:
                     df = pd.read_csv(cache_path, index_col=0, parse_dates=True)
                 except Exception as e:
                     print(f"Error reading cache: {e}. Re-fetching.")
-            
+
             if df.empty:
-                print(f"DEBUG: Cache MISS. Fetching IG data for {epic} ({resolution})...")
+                print(
+                    f"DEBUG: Cache MISS. Fetching IG data for {epic} ({resolution})..."
+                )
                 try:
                     df = client.fetch_historical_data_by_range(
                         epic, resolution, start_dt.strftime(fmt), end_dt.strftime(fmt)
@@ -191,102 +206,129 @@ class State(rx.State):
             if isinstance(df.index, pd.DatetimeIndex):
                 df = df.reset_index()
             date_col = df.columns[0]
-            
+
             # Check cache if needed, but plotting is fast enough usually
-            
+
             # --- Plotly Figure Construction ---
-            fig = go.Figure(data=[go.Candlestick(
-                x=df[date_col],
-                open=df['open'],
-                high=df['high'],
-                low=df['low'],
-                close=df['close'],
-                name=epic
-            )])
+            fig = go.Figure(
+                data=[
+                    go.Candlestick(
+                        x=df[date_col],
+                        open=df["open"],
+                        high=df["high"],
+                        low=df["low"],
+                        close=df["close"],
+                        name=epic,
+                    )
+                ]
+            )
 
             # Add Trend Line (SMA 10)
-            fig.add_trace(go.Scatter(
-                x=df[date_col], 
-                y=df['close'].rolling(window=10).mean(), 
-                mode='lines', 
-                name='Trend (SMA 10)', 
-                line=dict(color='yellow', width=1.5)
-            ))
+            fig.add_trace(
+                go.Scatter(
+                    x=df[date_col],
+                    y=df["close"].rolling(window=10).mean(),
+                    mode="lines",
+                    name="Trend (SMA 10)",
+                    line=dict(color="yellow", width=1.5),
+                )
+            )
 
             # Add Bollinger Bands
-            sma_20 = df['close'].rolling(window=20).mean()
-            std_20 = df['close'].rolling(window=20).std()
+            sma_20 = df["close"].rolling(window=20).mean()
+            std_20 = df["close"].rolling(window=20).std()
             upper_bb = sma_20 + (std_20 * 2)
             lower_bb = sma_20 - (std_20 * 2)
 
-            fig.add_trace(go.Scatter(
-                x=df[date_col], y=upper_bb,
-                line=dict(color='rgba(255, 255, 255, 0.3)', width=1, dash='dash'),
-                name='Upper BB'
-            ))
-            
-            fig.add_trace(go.Scatter(
-                x=df[date_col], y=lower_bb,
-                line=dict(color='rgba(255, 255, 255, 0.3)', width=1, dash='dash'),
-                fill='tonexty', # Fill area between Upper and Lower
-                fillcolor='rgba(255, 255, 255, 0.05)',
-                name='Lower BB'
-            ))
+            fig.add_trace(
+                go.Scatter(
+                    x=df[date_col],
+                    y=upper_bb,
+                    line=dict(color="rgba(255, 255, 255, 0.3)", width=1, dash="dash"),
+                    name="Upper BB",
+                )
+            )
+
+            fig.add_trace(
+                go.Scatter(
+                    x=df[date_col],
+                    y=lower_bb,
+                    line=dict(color="rgba(255, 255, 255, 0.3)", width=1, dash="dash"),
+                    fill="tonexty",  # Fill area between Upper and Lower
+                    fillcolor="rgba(255, 255, 255, 0.05)",
+                    name="Lower BB",
+                )
+            )
 
             # Add ATR Bands (1.5x)
             try:
                 # Calculate ATR using pandas_ta
                 df.ta.atr(length=14, append=True)
                 # The column name generated is usually ATRe_14 or similar, finding it dynamically
-                atr_col = [c for c in df.columns if 'ATR' in c][0] 
+                atr_col = [c for c in df.columns if "ATR" in c][0]
                 atr = df[atr_col]
-                
+
                 upper_atr = sma_20 + (atr * 1.5)
                 lower_atr = sma_20 - (atr * 1.5)
-                
-                fig.add_trace(go.Scatter(
-                    x=df[date_col], y=upper_atr,
-                    line=dict(color='cyan', width=1, dash='dot'),
-                    name='Upper ATR (1.5x)'
-                ))
-                fig.add_trace(go.Scatter(
-                    x=df[date_col], y=lower_atr,
-                    line=dict(color='cyan', width=1, dash='dot'),
-                    name='Lower ATR (1.5x)'
-                ))
+
+                fig.add_trace(
+                    go.Scatter(
+                        x=df[date_col],
+                        y=upper_atr,
+                        line=dict(color="cyan", width=1, dash="dot"),
+                        name="Upper ATR (1.5x)",
+                    )
+                )
+                fig.add_trace(
+                    go.Scatter(
+                        x=df[date_col],
+                        y=lower_atr,
+                        line=dict(color="cyan", width=1, dash="dot"),
+                        name="Lower ATR (1.5x)",
+                    )
+                )
             except Exception as e:
                 print(f"Could not add ATR bands: {e}")
 
             # Add Horizontal Lines (Entry, SL, TP)
             entry = float(trade.get("entry", 0))
             sl = float(trade.get("stop_loss", 0))
-            tp = float(trade.get("take_profit", 0) or 0) # Handle None
+            tp = float(trade.get("take_profit", 0) or 0)  # Handle None
 
             if entry > 0:
-                fig.add_hline(y=entry, line_dash="dash", line_color="green", annotation_text="Entry")
+                fig.add_hline(
+                    y=entry,
+                    line_dash="dash",
+                    line_color="green",
+                    annotation_text="Entry",
+                )
             if sl > 0:
-                fig.add_hline(y=sl, line_dash="dash", line_color="orange", annotation_text="SL")
+                fig.add_hline(
+                    y=sl, line_dash="dash", line_color="orange", annotation_text="SL"
+                )
             if tp > 0:
-                fig.add_hline(y=tp, line_dash="dash", line_color="purple", annotation_text="TP")
+                fig.add_hline(
+                    y=tp, line_dash="dash", line_color="purple", annotation_text="TP"
+                )
 
             # Add Trailing Stop Trigger (1.5R)
             if entry > 0 and sl > 0:
                 risk = abs(entry - sl)
                 action = trade.get("action", "").upper()
                 trigger_price = 0
-                
+
                 if action == "BUY":
                     trigger_price = entry + (1.5 * risk)
                 elif action == "SELL":
                     trigger_price = entry - (1.5 * risk)
-                
+
                 if trigger_price > 0:
                     fig.add_hline(
-                        y=trigger_price, 
-                        line_dash="dot", 
-                        line_color="cyan", 
+                        y=trigger_price,
+                        line_dash="dot",
+                        line_color="cyan",
                         annotation_text="Trail Trigger (1.5R)",
-                        annotation_position="top left"
+                        annotation_position="top left",
                     )
 
             # Add Vertical Lines (Entry Time, Exit Time)
@@ -300,15 +342,15 @@ class State(rx.State):
                 margin=dict(l=20, r=20, t=20, b=20),
                 xaxis_rangeslider_visible=False,
                 height=400,
-                paper_bgcolor='rgba(0,0,0,0)', # Transparent background
-                plot_bgcolor='rgba(0,0,0,0)',
+                paper_bgcolor="rgba(0,0,0,0)",  # Transparent background
+                plot_bgcolor="rgba(0,0,0,0)",
             )
-            
+
             self.chart_figure = fig
 
         except Exception as e:
             print(f"Error building graph: {e}")
-        
+
         self.is_loading_graph = False
 
     def show_demo_chart(self):
@@ -316,18 +358,18 @@ class State(rx.State):
         self.show_detail = True
         self.is_loading_graph = True
         self.chart_figure = go.Figure()
-        
+
         # 1. Create Mock Trade
         now = datetime.now()
         entry_time = now - timedelta(hours=2)
         exit_time = now - timedelta(minutes=30)
-        
+
         mock_trade = {
             "deal_id": "DEMO_123",
             "epic": "DEMO.FTSE100",
             "action": "BUY",
             "entry": 7500,
-            "exit_price": 7535, # Added exit price
+            "exit_price": 7535,  # Added exit price
             "stop_loss": 7480,
             "take_profit": 7540,
             "outcome": "WIN",
@@ -337,120 +379,165 @@ class State(rx.State):
             "exit_time": exit_time.isoformat(),
             "entry_time_graph": entry_time.strftime("%H:%M"),
             "exit_time_graph": exit_time.strftime("%H:%M"),
-            "trailing_activation_price": 7530, # Example trailing start
+            "trailing_activation_price": 7530,  # Example trailing start
             "graph_y_min": 7470,
-            "graph_y_max": 7560
+            "graph_y_max": 7560,
         }
         self.selected_trade = mock_trade
 
         # 2. Generate Synthetic OHLC Data
         import random
+
         data = []
-        current_price = 7490 # Start below entry
+        current_price = 7490  # Start below entry
         current_time = entry_time - timedelta(minutes=60)
-        
-        for i in range(40): # 40 candles of 5 mins = 3h 20m
+
+        for i in range(40):  # 40 candles of 5 mins = 3h 20m
             # Random walk
-            change = random.uniform(-3, 5) 
+            change = random.uniform(-3, 5)
             open_p = current_price
             close_p = current_price + change
             high_p = max(open_p, close_p) + random.uniform(0, 2)
             low_p = min(open_p, close_p) - random.uniform(0, 2)
-            
-            data.append({
-                "time": current_time,
-                "open": open_p,
-                "high": high_p,
-                "low": low_p,
-                "close": close_p
-            })
+
+            data.append(
+                {
+                    "time": current_time,
+                    "open": open_p,
+                    "high": high_p,
+                    "low": low_p,
+                    "close": close_p,
+                }
+            )
             current_price = close_p
             current_time += timedelta(minutes=5)
 
         df = pd.DataFrame(data)
 
         # 3. Build Plotly Figure
-        fig = go.Figure(data=[go.Candlestick(
-            x=df['time'],
-            open=df['open'],
-            high=df['high'],
-            low=df['low'],
-            close=df['close'],
-            name="DEMO.FTSE100"
-        )])
+        fig = go.Figure(
+            data=[
+                go.Candlestick(
+                    x=df["time"],
+                    open=df["open"],
+                    high=df["high"],
+                    low=df["low"],
+                    close=df["close"],
+                    name="DEMO.FTSE100",
+                )
+            ]
+        )
 
         # Add Trend Line (SMA 10)
-        fig.add_trace(go.Scatter(
-            x=df['time'], 
-            y=df['close'].rolling(window=10).mean(), 
-            mode='lines', 
-            name='Trend (SMA 10)', 
-            line=dict(color='yellow', width=1.5)
-        ))
+        fig.add_trace(
+            go.Scatter(
+                x=df["time"],
+                y=df["close"].rolling(window=10).mean(),
+                mode="lines",
+                name="Trend (SMA 10)",
+                line=dict(color="yellow", width=1.5),
+            )
+        )
 
         # Add Bollinger Bands
-        sma_20 = df['close'].rolling(window=20).mean()
-        std_20 = df['close'].rolling(window=20).std()
+        sma_20 = df["close"].rolling(window=20).mean()
+        std_20 = df["close"].rolling(window=20).std()
         upper_bb = sma_20 + (std_20 * 2)
         lower_bb = sma_20 - (std_20 * 2)
 
-        fig.add_trace(go.Scatter(
-            x=df['time'], y=upper_bb,
-            line=dict(color='rgba(255, 255, 255, 0.3)', width=1, dash='dash'),
-            name='Upper BB'
-        ))
-        
-        fig.add_trace(go.Scatter(
-            x=df['time'], y=lower_bb,
-            line=dict(color='rgba(255, 255, 255, 0.3)', width=1, dash='dash'),
-            fill='tonexty', 
-            fillcolor='rgba(255, 255, 255, 0.05)',
-            name='Lower BB'
-        ))
+        fig.add_trace(
+            go.Scatter(
+                x=df["time"],
+                y=upper_bb,
+                line=dict(color="rgba(255, 255, 255, 0.3)", width=1, dash="dash"),
+                name="Upper BB",
+            )
+        )
+
+        fig.add_trace(
+            go.Scatter(
+                x=df["time"],
+                y=lower_bb,
+                line=dict(color="rgba(255, 255, 255, 0.3)", width=1, dash="dash"),
+                fill="tonexty",
+                fillcolor="rgba(255, 255, 255, 0.05)",
+                name="Lower BB",
+            )
+        )
 
         # Add ATR Bands (1.5x)
         try:
             df.ta.atr(length=14, append=True)
-            atr_col = [c for c in df.columns if 'ATR' in c][0]
+            atr_col = [c for c in df.columns if "ATR" in c][0]
             atr = df[atr_col]
-            
+
             upper_atr = sma_20 + (atr * 1.5)
             lower_atr = sma_20 - (atr * 1.5)
-            
-            fig.add_trace(go.Scatter(
-                x=df['time'], y=upper_atr,
-                line=dict(color='cyan', width=1, dash='dot'),
-                name='Upper ATR (1.5x)'
-            ))
-            fig.add_trace(go.Scatter(
-                x=df['time'], y=lower_atr,
-                line=dict(color='cyan', width=1, dash='dot'),
-                name='Lower ATR (1.5x)'
-            ))
+
+            fig.add_trace(
+                go.Scatter(
+                    x=df["time"],
+                    y=upper_atr,
+                    line=dict(color="cyan", width=1, dash="dot"),
+                    name="Upper ATR (1.5x)",
+                )
+            )
+            fig.add_trace(
+                go.Scatter(
+                    x=df["time"],
+                    y=lower_atr,
+                    line=dict(color="cyan", width=1, dash="dot"),
+                    name="Lower ATR (1.5x)",
+                )
+            )
         except Exception as e:
             print(f"Could not add ATR bands to demo: {e}")
 
         # Markers
-        fig.add_hline(y=mock_trade["entry"], line_dash="dash", line_color="green", annotation_text="Entry (7500)")
-        fig.add_hline(y=mock_trade["stop_loss"], line_dash="dash", line_color="orange", annotation_text="SL (7480)")
-        fig.add_hline(y=mock_trade["take_profit"], line_dash="dash", line_color="purple", annotation_text="TP (7540)")
-        
+        fig.add_hline(
+            y=mock_trade["entry"],
+            line_dash="dash",
+            line_color="green",
+            annotation_text="Entry (7500)",
+        )
+        fig.add_hline(
+            y=mock_trade["stop_loss"],
+            line_dash="dash",
+            line_color="orange",
+            annotation_text="SL (7480)",
+        )
+        fig.add_hline(
+            y=mock_trade["take_profit"],
+            line_dash="dash",
+            line_color="purple",
+            annotation_text="TP (7540)",
+        )
+
         # Add Trailing Stop Trigger (1.5R)
         risk = abs(mock_trade["entry"] - mock_trade["stop_loss"])
-        trigger_price = mock_trade["entry"] + (1.5 * risk) if mock_trade["action"] == "BUY" else mock_trade["entry"] - (1.5 * risk)
-        
-        fig.add_hline(
-            y=trigger_price, 
-            line_dash="dot", 
-            line_color="cyan", 
-            annotation_text="Trail Trigger (1.5R)",
-            annotation_position="top left"
+        trigger_price = (
+            mock_trade["entry"] + (1.5 * risk)
+            if mock_trade["action"] == "BUY"
+            else mock_trade["entry"] - (1.5 * risk)
         )
-        
+
+        fig.add_hline(
+            y=trigger_price,
+            line_dash="dot",
+            line_color="cyan",
+            annotation_text="Trail Trigger (1.5R)",
+            annotation_position="top left",
+        )
+
         # Middle Line (between Entry and TP)
         mid_line = (mock_trade["entry"] + mock_trade["take_profit"]) / 2
-        fig.add_hline(y=mid_line, line_dash="dot", line_color="white", annotation_text=f"Mid ({mid_line})")
-        
+        fig.add_hline(
+            y=mid_line,
+            line_dash="dot",
+            line_color="white",
+            annotation_text=f"Mid ({mid_line})",
+        )
+
         fig.add_vline(x=entry_time, line_dash="dot", line_color="green")
         fig.add_vline(x=exit_time, line_dash="dot", line_color="red")
 
@@ -460,10 +547,10 @@ class State(rx.State):
             margin=dict(l=20, r=20, t=20, b=20),
             xaxis_rangeslider_visible=False,
             height=400,
-            paper_bgcolor='rgba(0,0,0,0)',
-            plot_bgcolor='rgba(0,0,0,0)',
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
         )
-        
+
         self.chart_figure = fig
         self.is_loading_graph = False
 
@@ -476,12 +563,15 @@ def status_badge(label: str, status: str) -> rx.Component:
     return rx.card(
         rx.vstack(
             rx.text(label, font_size="0.8em", font_weight="bold"),
-            rx.text(status, 
-                   color=rx.cond(status.to_string().contains("CLOSED"), "red", "green"), 
-                   font_weight="bold"),
+            rx.text(
+                status,
+                color=rx.cond(status.to_string().contains("CLOSED"), "red", "green"),
+                font_weight="bold",
+            ),
         ),
         padding="1em",
     )
+
 
 def trade_detail_modal() -> rx.Component:
     return rx.dialog.root(
@@ -491,76 +581,82 @@ def trade_detail_modal() -> rx.Component:
                 rx.dialog.title("Trade Analysis"),
                 rx.spacer(),
                 rx.button(
-                    rx.cond(State.is_fullscreen, rx.icon(tag="minimize-2"), rx.icon(tag="maximize-2")),
+                    rx.cond(
+                        State.is_fullscreen,
+                        rx.icon(tag="minimize-2"),
+                        rx.icon(tag="maximize-2"),
+                    ),
                     on_click=State.toggle_fullscreen,
                     variant="ghost",
-                    size="2"
+                    size="2",
                 ),
                 rx.dialog.close(
-                    rx.button(rx.icon(tag="x"), variant="ghost", size="2", on_click=State.close_detail),
+                    rx.button(
+                        rx.icon(tag="x"),
+                        variant="ghost",
+                        size="2",
+                        on_click=State.close_detail,
+                    ),
                 ),
                 width="100%",
                 align_items="center",
                 margin_bottom="1em",
             ),
-
             rx.dialog.description("Review trade execution and market context."),
-            
             rx.vstack(
                 rx.hstack(
                     rx.badge(State.selected_trade["epic"], size="3"),
-                    rx.badge(State.selected_trade["action"], 
-                             color_scheme=rx.cond(State.selected_trade["action"] == "BUY", "green", "red"),
-                             size="3"),
+                    rx.badge(
+                        State.selected_trade["action"],
+                        color_scheme=rx.cond(
+                            State.selected_trade["action"] == "BUY", "green", "red"
+                        ),
+                        size="3",
+                    ),
                     spacing="2",
                     margin_bottom="1em",
                 ),
-                
                 # Use a grid for better layout of trade details
                 rx.grid(
                     rx.text("Outcome:", font_weight="bold", text_align="right"),
                     rx.text(State.selected_trade["outcome"], text_align="left"),
-                    
                     rx.text("PnL:", font_weight="bold", text_align="right"),
                     rx.text(State.selected_trade["pnl"], text_align="left"),
-                    
                     rx.text("Entry:", font_weight="bold", text_align="right"),
-                    rx.text(f"{State.selected_trade['entry']} | Exit: {State.selected_trade['exit_price']}", text_align="left"),
-
-                    columns="2", 
-                    spacing_x="4", 
+                    rx.text(
+                        f"{State.selected_trade['entry']} | Exit: {State.selected_trade['exit_price']}",
+                        text_align="left",
+                    ),
+                    columns="2",
+                    spacing_x="4",
                     spacing_y="2",
-                    width="100%", 
-                    max_width="500px", 
+                    width="100%",
+                    max_width="500px",
                     margin_bottom="1em",
                 ),
-                
                 # Reasoning section
                 rx.vstack(
                     rx.text("Reasoning:", font_weight="bold"),
-                    rx.text(State.selected_trade['reasoning'], size="1", color="gray"),
+                    rx.text(State.selected_trade["reasoning"], size="1", color="gray"),
                     align_items="flex-start",
                     width="100%",
                     margin_bottom="1em",
                 ),
-                
-                rx.divider(width="100%"), 
-                
+                rx.divider(width="100%"),
                 rx.cond(
                     State.is_loading_graph,
                     rx.spinner(),
                     # Use rx.plotly for the chart
                     rx.plotly(
-                        data=State.chart_figure, 
-                        height=rx.cond(State.is_fullscreen, "70vh", "400px"), 
-                        width="100%"
-                    ) 
+                        data=State.chart_figure,
+                        height=rx.cond(State.is_fullscreen, "70vh", "400px"),
+                        width="100%",
+                    ),
                 ),
                 spacing="4",
                 align_items="flex-start",
                 width="100%",
             ),
-            
             rx.flex(
                 rx.dialog.close(
                     rx.button("Close", on_click=State.close_detail),
@@ -577,12 +673,12 @@ def trade_detail_modal() -> rx.Component:
         on_open_change=State.close_detail,
     )
 
+
 def index() -> rx.Component:
     return rx.box(
         trade_detail_modal(),
         rx.vstack(
             rx.heading("Gemini Trader Bot", size="8"),
-            
             rx.grid(
                 status_badge("London", State.uk_status),
                 status_badge("Germany", State.de_status),
@@ -594,35 +690,63 @@ def index() -> rx.Component:
                 spacing="2",
                 width="100%",
             ),
-
             rx.hstack(
                 rx.spacer(),
                 rx.text(f"Last Updated: {State.last_updated}", color="gray"),
                 rx.button("Refresh", on_click=State.load_data),
-                rx.button("Demo Chart", on_click=State.show_demo_chart, variant="surface", color_scheme="blue"),
+                rx.button(
+                    "Demo Chart",
+                    on_click=State.show_demo_chart,
+                    variant="surface",
+                    color_scheme="blue",
+                ),
                 spacing="2",
                 width="100%",
                 align_items="center",
             ),
-            
             rx.divider(),
-
             rx.heading("Performance Scorecard", size="5"),
             rx.grid(
-                rx.card(rx.vstack(rx.text("Net PnL", size="1"), rx.heading(f"£{State.net_pnl}", size="6", color=rx.cond(State.net_pnl >= 0, "green", "red")))),
-                rx.card(rx.vstack(rx.text("Win Rate", size="1"), rx.heading(f"{State.win_rate}%", size="6"))),
-                rx.card(rx.vstack(rx.text("Profit Factor", size="1"), rx.heading(State.profit_factor.to_string(), size="6"))),
-                rx.card(rx.vstack(rx.text("Total Trades", size="1"), rx.heading(State.total_trades.to_string(), size="6"))),
-                rx.card(rx.vstack(rx.text("AI Conv. Rate", size="1"), rx.heading(f"{State.conversion_rate}%", size="6"))),
+                rx.card(
+                    rx.vstack(
+                        rx.text("Net PnL", size="1"),
+                        rx.heading(
+                            f"£{State.net_pnl}",
+                            size="6",
+                            color=rx.cond(State.net_pnl >= 0, "green", "red"),
+                        ),
+                    )
+                ),
+                rx.card(
+                    rx.vstack(
+                        rx.text("Win Rate", size="1"),
+                        rx.heading(f"{State.win_rate}%", size="6"),
+                    )
+                ),
+                rx.card(
+                    rx.vstack(
+                        rx.text("Profit Factor", size="1"),
+                        rx.heading(State.profit_factor.to_string(), size="6"),
+                    )
+                ),
+                rx.card(
+                    rx.vstack(
+                        rx.text("Total Trades", size="1"),
+                        rx.heading(State.total_trades.to_string(), size="6"),
+                    )
+                ),
+                rx.card(
+                    rx.vstack(
+                        rx.text("AI Conv. Rate", size="1"),
+                        rx.heading(f"{State.conversion_rate}%", size="6"),
+                    )
+                ),
                 columns="5",
                 spacing="2",
                 width="100%",
             ),
-            
             rx.divider(),
-            
             rx.heading("Cumulative PnL", size="5"),
-            
             rx.recharts.area_chart(
                 rx.recharts.area(
                     data_key="cumulative_pnl",
@@ -637,11 +761,8 @@ def index() -> rx.Component:
                 width="100%",
                 height=300,
             ),
-
             rx.divider(),
-
             rx.heading("Recent Trades", size="5"),
-            
             rx.table.root(
                 rx.table.header(
                     rx.table.row(
@@ -671,19 +792,20 @@ def index() -> rx.Component:
                                     rx.icon("chart-line"),
                                     size="1",
                                     variant="ghost",
-                                    on_click=lambda: State.open_trade_detail(trade)
+                                    on_click=lambda: State.open_trade_detail(trade),
                                 )
                             ),
                         ),
                     )
                 ),
-                width="100%"
+                width="100%",
             ),
-            spacing="4", # Place spacing as the last keyword argument of rx.vstack
+            spacing="4",  # Place spacing as the last keyword argument of rx.vstack
         ),
         width="100%",
         padding="2em",
     )
+
 
 app = rx.App(theme=rx.theme(appearance="dark"))
 app.add_page(index, on_load=State.load_data)

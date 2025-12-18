@@ -188,7 +188,6 @@ class TradeMonitorDB:
                             if pos:
                                 direction = pos.get("direction")
                                 size = float(pos.get("size", 0))
-                                expiry = pos.get("expiry", "DFB")
 
                                 # Invert direction for closing
                                 close_direction = (
@@ -272,8 +271,12 @@ class TradeMonitorDB:
                                 )
 
                                 # Only update if the new stop is "better" than current stop BY AT LEAST min_step
-                                if (direction == "BUY" and new_stop > (current_stop + min_step)) or (
-                                    direction == "SELL" and new_stop < (current_stop - min_step)
+                                if (
+                                    direction == "BUY"
+                                    and new_stop > (current_stop + min_step)
+                                ) or (
+                                    direction == "SELL"
+                                    and new_stop < (current_stop - min_step)
                                 ):
                                     logger.info(
                                         f"Trailing Stop for {deal_id} to {new_stop} (Step: {abs(new_stop - current_stop):.2f} > {min_step:.2f})"

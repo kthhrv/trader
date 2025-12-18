@@ -1,13 +1,13 @@
 import unittest
-from unittest.mock import MagicMock, patch
-import time
+from unittest.mock import MagicMock
 import os
 import uuid
 
 from src.strategy_engine import StrategyEngine
 from src.gemini_analyst import TradingSignal, Action, EntryType
-from src.database import init_db, get_db_connection, save_post_mortem, fetch_trade_data
+from src.database import init_db, get_db_connection
 from src.trade_logger_db import TradeLoggerDB
+
 
 class TestStrategyTimeout(unittest.TestCase):
     def setUp(self):
@@ -17,15 +17,15 @@ class TestStrategyTimeout(unittest.TestCase):
         self.mock_analyst = MagicMock()
         self.trade_logger = TradeLoggerDB(db_path=self.test_db_path)
         self.mock_stream_manager = MagicMock()
-        
+
         self.engine = StrategyEngine(
             epic="CS.D.GBPUSD.TODAY.IP",
             ig_client=self.mock_ig_client,
             analyst=self.mock_analyst,
             trade_logger=self.trade_logger,
-            stream_manager=self.mock_stream_manager
+            stream_manager=self.mock_stream_manager,
         )
-        
+
         # Set up a dummy active plan
         self.engine.active_plan = TradingSignal(
             ticker="GBPUSD",
@@ -38,7 +38,7 @@ class TestStrategyTimeout(unittest.TestCase):
             use_trailing_stop=False,
             confidence="high",
             reasoning="Test",
-            entry_type=EntryType.INSTANT
+            entry_type=EntryType.INSTANT,
         )
         self.engine.active_plan_id = None
 
@@ -48,7 +48,7 @@ class TestStrategyTimeout(unittest.TestCase):
     def test_timeout_logging(self):
         # Run execution with a very short timeout
         self.engine.execute_strategy(timeout_seconds=0.01)
-        
+
         # Verify trade was logged as TIMED_OUT
         conn = get_db_connection(self.test_db_path)
         cursor = conn.cursor()
@@ -57,7 +57,7 @@ class TestStrategyTimeout(unittest.TestCase):
         conn.close()
 
         self.assertIsNotNone(timed_out_trade)
-        self.assertEqual(timed_out_trade['outcome'], "TIMED_OUT")
+        self.assertEqual(timed_out_trade["outcome"], "TIMED_OUT")
         # Deal ID should be None/Null now
-        self.assertIsNone(timed_out_trade['deal_id'])
-        self.assertEqual(timed_out_trade['spread_at_entry'], 0.0)
+        self.assertIsNone(timed_out_trade["deal_id"])
+        self.assertEqual(timed_out_trade["spread_at_entry"], 0.0)

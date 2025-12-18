@@ -1,9 +1,7 @@
 import pytest
 from unittest.mock import patch
-import pandas as pd
 from src.scorecard import generate_scorecard
-import io
-import sys
+
 
 # Sample data fixtures
 @pytest.fixture
@@ -11,47 +9,74 @@ def sample_trades():
     return [
         # Win
         {
-            'id': 1, 'timestamp': '2025-05-20 08:00:00', 'epic': 'IX.D.FTSE.DAILY.IP',
-            'outcome': 'WIN', 'pnl': 50.0, 'deal_id': 'DEAL_1',
-            'confidence': 'HIGH', 'entry_type': 'CONFIRMATION'
+            "id": 1,
+            "timestamp": "2025-05-20 08:00:00",
+            "epic": "IX.D.FTSE.DAILY.IP",
+            "outcome": "WIN",
+            "pnl": 50.0,
+            "deal_id": "DEAL_1",
+            "confidence": "HIGH",
+            "entry_type": "CONFIRMATION",
         },
         # Loss
         {
-            'id': 2, 'timestamp': '2025-05-20 09:00:00', 'epic': 'IX.D.DAX.DAILY.IP',
-            'outcome': 'LOSS', 'pnl': -25.0, 'deal_id': 'DEAL_2',
-            'confidence': 'MEDIUM', 'entry_type': 'INSTANT'
+            "id": 2,
+            "timestamp": "2025-05-20 09:00:00",
+            "epic": "IX.D.DAX.DAILY.IP",
+            "outcome": "LOSS",
+            "pnl": -25.0,
+            "deal_id": "DEAL_2",
+            "confidence": "MEDIUM",
+            "entry_type": "INSTANT",
         },
         # Wait
         {
-            'id': 3, 'timestamp': '2025-05-20 10:00:00', 'epic': 'IX.D.SPTRD.DAILY.IP',
-            'outcome': 'WAIT', 'pnl': None, 'deal_id': None,
-            'confidence': 'LOW', 'entry_type': 'INSTANT'
+            "id": 3,
+            "timestamp": "2025-05-20 10:00:00",
+            "epic": "IX.D.SPTRD.DAILY.IP",
+            "outcome": "WAIT",
+            "pnl": None,
+            "deal_id": None,
+            "confidence": "LOW",
+            "entry_type": "INSTANT",
         },
         # Rejected
         {
-            'id': 4, 'timestamp': '2025-05-20 11:00:00', 'epic': 'IX.D.NASDAQ.DAILY.IP',
-            'outcome': 'REJECTED_SAFETY', 'pnl': None, 'deal_id': None,
-            'confidence': 'HIGH', 'entry_type': 'CONFIRMATION'
+            "id": 4,
+            "timestamp": "2025-05-20 11:00:00",
+            "epic": "IX.D.NASDAQ.DAILY.IP",
+            "outcome": "REJECTED_SAFETY",
+            "pnl": None,
+            "deal_id": None,
+            "confidence": "HIGH",
+            "entry_type": "CONFIRMATION",
         },
         # Timeout (No Deal)
         {
-            'id': 5, 'timestamp': '2025-05-20 12:00:00', 'epic': 'IX.D.NIKKEI.DAILY.IP',
-            'outcome': 'TIMED_OUT', 'pnl': None, 'deal_id': 'TIMEOUT_123',
-            'confidence': 'MEDIUM', 'entry_type': 'CONFIRMATION'
-        }
+            "id": 5,
+            "timestamp": "2025-05-20 12:00:00",
+            "epic": "IX.D.NIKKEI.DAILY.IP",
+            "outcome": "TIMED_OUT",
+            "pnl": None,
+            "deal_id": "TIMEOUT_123",
+            "confidence": "MEDIUM",
+            "entry_type": "CONFIRMATION",
+        },
     ]
 
+
 def test_scorecard_empty(capsys):
-    with patch('src.scorecard.fetch_all_trade_logs', return_value=[]):
+    with patch("src.scorecard.fetch_all_trade_logs", return_value=[]):
         generate_scorecard()
-    
+
     captured = capsys.readouterr()
     assert "No data found in trade_log." in captured.out
 
+
 def test_scorecard_full_report(sample_trades, capsys):
-    with patch('src.scorecard.fetch_all_trade_logs', return_value=sample_trades):
+    with patch("src.scorecard.fetch_all_trade_logs", return_value=sample_trades):
         generate_scorecard()
-    
+
     captured = capsys.readouterr()
     output = captured.out
 
@@ -77,7 +102,7 @@ def test_scorecard_full_report(sample_trades, capsys):
     # Win: 50, Loss: -25. Net: 25.
     assert "Net PnL:             £+25.00" in output
     assert "Win Rate:            50.0%" in output
-    assert "Profit Factor:       2.00" in output # 50 / 25
+    assert "Profit Factor:       2.00" in output  # 50 / 25
 
     # Check Market Names Normalization
     assert "LONDON" in output
@@ -87,22 +112,27 @@ def test_scorecard_full_report(sample_trades, capsys):
     assert "HIGH" in output
     assert "MEDIUM" in output
 
+
 def test_scorecard_legacy_data(capsys):
     # Simulate old data missing 'entry_type' or 'confidence'
     legacy_data = [
         {
-            'id': 1, 'timestamp': '2024-01-01', 'epic': 'FTSE',
-            'outcome': 'WIN', 'pnl': 100.0, 'deal_id': 'OLD_1',
+            "id": 1,
+            "timestamp": "2024-01-01",
+            "epic": "FTSE",
+            "outcome": "WIN",
+            "pnl": 100.0,
+            "deal_id": "OLD_1",
             # Missing confidence and entry_type keys
         }
     ]
-    
-    with patch('src.scorecard.fetch_all_trade_logs', return_value=legacy_data):
+
+    with patch("src.scorecard.fetch_all_trade_logs", return_value=legacy_data):
         generate_scorecard()
-        
+
     captured = capsys.readouterr()
     output = captured.out
-    
+
     assert "Confidence data missing" in output
     assert "Entry Type data missing" in output
     assert "Net PnL:             £+100.00" in output

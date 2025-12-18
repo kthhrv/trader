@@ -14,7 +14,9 @@ TRADING_PLAN_PATH = ROOT_DIR / "trading_plan.json"
 # Default to FALSE (Paper Trading) if not explicitly set to "true"
 IS_LIVE = os.getenv("IS_LIVE", "false").lower() == "true"
 MAX_DAILY_LOSS = float(os.getenv("MAX_DAILY_LOSS", 50.0))  # GBP/USD value
-RISK_PER_TRADE_PERCENT = float(os.getenv("RISK_PER_TRADE_PERCENT", 0.01)) # Risk 1% of account balance per trade
+RISK_PER_TRADE_PERCENT = float(
+    os.getenv("RISK_PER_TRADE_PERCENT", 0.01)
+)  # Risk 1% of account balance per trade
 
 # --- API Keys ---
 IG_API_KEY = os.getenv("IG_API_KEY")

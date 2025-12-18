@@ -22,7 +22,9 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "pre-commit>=4.5.1",
     "pytest>=9.0.1",
+    "ruff>=0.14.9",
 ]
 
 [tool.uv.workspace]
