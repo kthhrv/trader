@@ -81,6 +81,16 @@ class TestMarketStatus(unittest.TestCase):
             date(2025, 1, 26)
         )
 
+    def test_is_holiday_germany(self):
+        # Using specific logic for Germany if implemented, currently default False
+        # But we can verify it doesn't crash and checks logic if we add a DE calendar later
+        # For now, just checking it returns False as per current implementation
+        mock_now = datetime(2025, 12, 25, 10, 0, tzinfo=pytz.UTC)
+        self.mock_datetime.now.return_value = mock_now
+
+        # Current implementation hardcodes False for DE
+        self.assertFalse(self.market_status.is_holiday("IX.D.DAX.DAILY.IP"))
+
     def test_is_holiday_date_rollover_australia(self):
         # MONDAY 11:00 PM UK (23:00 UTC)
         # This is TUESDAY morning in Australia (10:00 AM Sydney)
