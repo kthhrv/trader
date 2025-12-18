@@ -58,7 +58,8 @@ def init_db(db_path=None):
             pnl REAL,
             exit_time TEXT,
             post_mortem TEXT,
-            use_trailing_stop BOOLEAN
+            use_trailing_stop BOOLEAN,
+            initial_stop_loss REAL
         )
     """)
 
@@ -80,6 +81,16 @@ def init_db(db_path=None):
         )
         try:
             cursor.execute("ALTER TABLE trade_log ADD COLUMN use_trailing_stop BOOLEAN")
+            logger.info("Migration successful.")
+        except Exception as e:
+            logger.error(f"Migration failed: {e}")
+
+    if "initial_stop_loss" not in columns:
+        logger.info(
+            "Migrating database: Adding 'initial_stop_loss' column to 'trade_log'..."
+        )
+        try:
+            cursor.execute("ALTER TABLE trade_log ADD COLUMN initial_stop_loss REAL")
             logger.info("Migration successful.")
         except Exception as e:
             logger.error(f"Migration failed: {e}")
@@ -219,6 +230,26 @@ def fetch_active_trades(db_path=None):
         conn.close()
 
 
+def update_trade_stop_loss(deal_id: str, new_stop_loss: float, db_path=None):
+    """
+    Updates the current stop_loss for a deal (trailing stop update).
+    Does NOT affect initial_stop_loss.
+    """
+    conn = get_db_connection(db_path)
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "UPDATE trade_log SET stop_loss = ? WHERE deal_id = ?",
+            (new_stop_loss, deal_id),
+        )
+        conn.commit()
+        logger.info(f"Updated DB stop_loss for {deal_id} to {new_stop_loss}")
+    except Exception as e:
+        logger.error(f"Failed to update stop_loss in DB: {e}")
+    finally:
+        conn.close()
+
+
 def sync_active_trade(
     deal_id: str,
     epic: str,
@@ -260,10 +291,10 @@ def sync_active_trade(
             cursor.execute(
                 """
                 INSERT INTO trade_log (
-                    timestamp, epic, action, entry_type, entry, stop_loss, take_profit,
+                    timestamp, epic, action, entry_type, entry, stop_loss, initial_stop_loss, take_profit,
                     size, outcome, reasoning, confidence, spread_at_entry,
                     atr, is_dry_run, deal_id, use_trailing_stop
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     timestamp,
@@ -272,6 +303,7 @@ def sync_active_trade(
                     "MANUAL_MONITOR",
                     entry,
                     stop_loss,
+                    stop_loss,  # Set initial_stop_loss same as current for manual resume
                     take_profit,
                     size,
                     "LIVE_PLACED",

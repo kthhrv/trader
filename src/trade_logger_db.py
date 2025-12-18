@@ -33,10 +33,10 @@ class TradeLoggerDB:
             cursor.execute(
                 """
                 INSERT INTO trade_log (
-                    timestamp, epic, action, entry_type, entry, stop_loss, take_profit,
+                    timestamp, epic, action, entry_type, entry, stop_loss, initial_stop_loss, take_profit,
                     size, outcome, reasoning, confidence, spread_at_entry,
                     atr, is_dry_run, deal_id, use_trailing_stop
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
                 (
                     timestamp,
@@ -47,6 +47,7 @@ class TradeLoggerDB:
                     entry_type,
                     plan.entry,
                     plan.stop_loss,
+                    plan.stop_loss,  # initial_stop_loss
                     plan.take_profit,
                     plan.size,
                     outcome,

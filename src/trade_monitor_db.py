@@ -3,7 +3,7 @@ import time
 from datetime import datetime, timedelta
 from typing import Dict, Optional
 from src.ig_client import IGClient
-from src.database import update_trade_outcome
+from src.database import update_trade_outcome, update_trade_stop_loss
 from src.stream_manager import StreamManager  # New import
 from src.market_status import MarketStatus
 import threading  # New import
@@ -252,6 +252,11 @@ class TradeMonitorDB:
                                     self.client.update_open_position(
                                         deal_id, stop_level=new_stop
                                     )
+                                    # Update DB to reflect new trailing stop level
+                                    update_trade_stop_loss(
+                                        deal_id, new_stop, self.db_path
+                                    )
+
                                     moved_to_breakeven = True
                                     current_stop = new_stop  # Update local tracker
 
@@ -284,6 +289,11 @@ class TradeMonitorDB:
                                     self.client.update_open_position(
                                         deal_id, stop_level=new_stop
                                     )
+                                    # Update DB to reflect new trailing stop level
+                                    update_trade_stop_loss(
+                                        deal_id, new_stop, self.db_path
+                                    )
+
                                     # moved_to_breakeven is implicitly true here
                         # else: Position not found via polling. This might mean it closed and stream update is delayed.
 

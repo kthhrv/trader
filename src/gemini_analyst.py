@@ -238,16 +238,17 @@ class GeminiAnalyst:
         prompt = f"""
         You are a senior trading risk manager conducting a post-mortem analysis.
         
-        **Trade Plan:**
-        - Ticker: {log.get("epic")}
+        **Trade Log:**
+        - Entry: {log.get("entry")}
+        - Initial Stop Loss: {log.get("initial_stop_loss", "N/A")} (Use this for validation checks)
+        - Final Stop Loss: {log.get("stop_loss")} (Might be updated by trailing stop)
+        - Take Profit: {log.get("take_profit")}
         - Action: {log.get("action")}
-        - Planned Entry: {log.get("entry")}
-        - Planned Stop: {log.get("stop_loss")}
-        - Planned TP: {log.get("take_profit")}
+        - Outcome: {log.get("outcome")}
+        - Exit Price: {log.get("exit_price")}
         - Reasoning: {log.get("reasoning")}
         
-        **Execution & Outcome:**
-        - Outcome: {log.get("outcome")}
+        **Execution Stats:**
         - Spread at Entry: {log.get("spread_at_entry")}
         - Start Price (Bid): {start_price}
         - End Price (Bid): {end_price}
