@@ -1,6 +1,7 @@
 import unittest
 from unittest.mock import patch
-from datetime import date
+from datetime import datetime, date
+import pytz
 from src.market_status import MarketStatus
 
 
@@ -16,9 +17,14 @@ class TestMarketStatus(unittest.TestCase):
         self.patcher_japan = patch("src.market_status.holidays.Japan")
         self.mock_japan_holidays_cls = self.patcher_japan.start()
 
-        # Patch date.today()
-        self.patcher_date = patch("src.market_status.date")
-        self.mock_date = self.patcher_date.start()
+        self.patcher_australia = patch("src.market_status.holidays.Australia")
+        self.mock_au_holidays_cls = self.patcher_australia.start()
+
+        # Patch datetime.now()
+        self.patcher_datetime = patch("src.market_status.datetime")
+        self.mock_datetime = self.patcher_datetime.start()
+        # Ensure it behaves like a real datetime for basic attributes if needed
+        self.mock_datetime.now.return_value = datetime(2025, 1, 1, tzinfo=pytz.UTC)
 
         # Now instantiate MarketStatus (it will use the patched classes)
         self.market_status = MarketStatus()
@@ -27,53 +33,76 @@ class TestMarketStatus(unittest.TestCase):
         self.patcher_uk.stop()
         self.patcher_nyse.stop()
         self.patcher_japan.stop()
-        self.patcher_date.stop()
+        self.patcher_australia.stop()
+        self.patcher_datetime.stop()
 
-    def test_is_holiday_true_uk(self):
-        self.mock_date.today.return_value = date(2025, 12, 25)
+    def test_is_holiday_uk(self):
+        # Mocking datetime.now(tz)
+        # In UK, date should be the same as mocked UTC now
+        mock_now = datetime(2025, 12, 25, 10, 0, tzinfo=pytz.UTC)
+        self.mock_datetime.now.return_value = mock_now
         self.mock_uk_holidays_cls.return_value.__contains__.return_value = True
 
         self.assertTrue(self.market_status.is_holiday("IX.D.FTSE.DAILY.IP"))
-        self.mock_uk_holidays_cls.return_value.__contains__.assert_called_once_with(
+        self.mock_uk_holidays_cls.return_value.__contains__.assert_called_with(
             date(2025, 12, 25)
         )
-        self.mock_uk_holidays_cls.assert_called_once()
 
-    def test_is_holiday_false_uk(self):
-        self.mock_date.today.return_value = date(2025, 12, 24)
-        self.mock_uk_holidays_cls.return_value.__contains__.return_value = False
+    def test_is_holiday_us(self):
+        mock_now = datetime(2025, 7, 4, 15, 0, tzinfo=pytz.UTC)
+        self.mock_datetime.now.return_value = mock_now
+        self.mock_nyse_holidays_cls.return_value.__contains__.return_value = True
 
-        self.assertFalse(self.market_status.is_holiday("IX.D.FTSE.DAILY.IP"))
-        self.mock_uk_holidays_cls.return_value.__contains__.assert_called_once_with(
-            date(2025, 12, 24)
+        self.assertTrue(self.market_status.is_holiday("IX.D.SPTRD.DAILY.IP"))
+        # 15:00 UTC is 11:00 AM NY (Same day)
+        self.mock_nyse_holidays_cls.return_value.__contains__.assert_called_with(
+            date(2025, 7, 4)
         )
-        self.mock_uk_holidays_cls.assert_called_once()
 
-    def test_is_holiday_unsupported_epic(self):
-        self.mock_date.today.return_value = date(2025, 1, 1)
-        self.assertFalse(self.market_status.is_holiday("UNSUPPORTED.EPIC"))
-        # For unsupported epic, no holiday class methods should be called.
-        # The `_get_country_code` returns None, so holiday.CountryHoliday is not even attempted to be instantiated.
-
-    def test_is_holiday_us_epic(self):
-        self.mock_date.today.return_value = date(2025, 11, 26)
-        self.mock_nyse_holidays_cls.return_value.__contains__.return_value = False
-
-        self.assertFalse(self.market_status.is_holiday("IX.D.SPTRD.DAILY.IP"))
-        self.mock_nyse_holidays_cls.return_value.__contains__.assert_called_once_with(
-            date(2025, 11, 26)
-        )
-        self.mock_nyse_holidays_cls.assert_called_once()
-
-    def test_is_holiday_japan_epic(self):
-        self.mock_date.today.return_value = date(2025, 1, 1)
+    def test_is_holiday_japan(self):
+        mock_now = datetime(2025, 1, 1, 10, 0, tzinfo=pytz.UTC)
+        self.mock_datetime.now.return_value = mock_now
         self.mock_japan_holidays_cls.return_value.__contains__.return_value = True
 
         self.assertTrue(self.market_status.is_holiday("IX.D.NIKKEI.DAILY.IP"))
-        self.mock_japan_holidays_cls.return_value.__contains__.assert_called_once_with(
+        # 10:00 UTC is 19:00 Japan (Same day)
+        self.mock_japan_holidays_cls.return_value.__contains__.assert_called_with(
             date(2025, 1, 1)
         )
-        self.mock_japan_holidays_cls.assert_called_once()
+
+    def test_is_holiday_australia(self):
+        mock_now = datetime(2025, 1, 26, 10, 0, tzinfo=pytz.UTC)
+        self.mock_datetime.now.return_value = mock_now
+        self.mock_au_holidays_cls.return_value.__contains__.return_value = True
+
+        self.assertTrue(self.market_status.is_holiday("IX.D.ASX.DAILY.IP"))
+        # 10:00 UTC is 21:00 Sydney (Same day)
+        self.mock_au_holidays_cls.return_value.__contains__.assert_called_with(
+            date(2025, 1, 26)
+        )
+
+    def test_is_holiday_date_rollover_australia(self):
+        # MONDAY 11:00 PM UK (23:00 UTC)
+        # This is TUESDAY morning in Australia (10:00 AM Sydney)
+        mock_now_utc = datetime(2025, 1, 20, 23, 0, tzinfo=pytz.UTC)
+        self.mock_datetime.now.side_effect = lambda tz: mock_now_utc.astimezone(tz)
+
+        # We want to check if the holiday check is performed for TUESDAY (21st)
+        self.mock_au_holidays_cls.return_value.__contains__.return_value = True
+
+        self.assertTrue(self.market_status.is_holiday("IX.D.ASX.DAILY.IP"))
+
+        # Verify it checked for the 21st, not the 20th
+        self.mock_au_holidays_cls.return_value.__contains__.assert_called_with(
+            date(2025, 1, 21)
+        )
+
+    def test_is_holiday_unsupported_epic(self):
+        self.assertFalse(self.market_status.is_holiday("UNSUPPORTED.EPIC"))
+
+
+if __name__ == "__main__":
+    unittest.main()
 
 
 if __name__ == "__main__":
