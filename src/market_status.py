@@ -22,6 +22,7 @@ class MarketStatus:
             self.us_holidays = holidays.UnitedStates()
 
         self.jp_holidays = holidays.Japan()
+        self.au_holidays = holidays.Australia()
 
     def _get_country_code(self, epic: str) -> Optional[str]:
         """
@@ -42,6 +43,8 @@ class MarketStatus:
             return "JP"
         elif "DAX" in epic or "DE30" in epic:
             return "DE"  # Assuming Germany for DAX
+        elif "ASX" in epic or "AUS200" in epic:
+            return "AU"
         return None
 
     def is_holiday(self, epic: str) -> bool:
@@ -80,6 +83,10 @@ class MarketStatus:
             # For now, default German holidays to False unless a specific library is used
             is_hol = False
             holiday_name = "German Public Holiday (Not checked)"
+        elif country_code == "AU":
+            if current_date in self.au_holidays:
+                is_hol = True
+                holiday_name = self.au_holidays.get(current_date)
 
         if is_hol:
             logger.info(
@@ -122,6 +129,12 @@ class MarketStatus:
             schedule = {"open": "09:00", "close": "15:00", "timezone": "Asia/Tokyo"}
         elif country == "DE":  # DAX
             schedule = {"open": "09:00", "close": "17:30", "timezone": "Europe/Berlin"}
+        elif country == "AU":  # ASX
+            schedule = {
+                "open": "10:00",
+                "close": "16:00",
+                "timezone": "Australia/Sydney",
+            }
 
         return schedule
 
