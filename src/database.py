@@ -173,6 +173,26 @@ def fetch_all_trade_logs(db_path=None):
     finally:
         conn.close()
 
+def fetch_active_trades(db_path=None):
+    """
+    Fetches trades that are currently PENDING (waiting for trigger) or LIVE_PLACED (open).
+    """
+    conn = get_db_connection(db_path)
+    cursor = conn.cursor()
+    try:
+        cursor.execute('''
+            SELECT * FROM trade_log 
+            WHERE outcome IN ('PENDING', 'LIVE_PLACED', 'DRY_RUN_PLACED') 
+            ORDER BY timestamp DESC
+        ''')
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+    except Exception as e:
+        logger.error(f"Failed to fetch active trades: {e}")
+        return []
+    finally:
+        conn.close()
+
 if __name__ == "__main__":
     # Configure logging if run directly
     logging.basicConfig(level=logging.INFO)

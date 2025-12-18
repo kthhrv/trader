@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 from apscheduler.schedulers.blocking import BlockingScheduler
 from src.strategy_engine import StrategyEngine
 from src.news_fetcher import NewsFetcher
-from src.database import fetch_trade_data, save_post_mortem, fetch_recent_trades
+from src.database import fetch_trade_data, save_post_mortem, fetch_recent_trades, fetch_active_trades
 from src.gemini_analyst import GeminiAnalyst, TradingSignal, Action, EntryType # Added imports
 from src.ig_client import IGClient
 from src.trade_monitor_db import TradeMonitorDB
@@ -266,6 +266,42 @@ def run_list_open_positions():
     except Exception as e:
         logger.error(f"Failed to list positions: {e}")
 
+def run_list_active_trades():
+    """
+    Fetches and prints trades that are currently active (PENDING or PLACED) from the DB.
+    """
+    logger.info("Fetching active trades from Database...")
+    trades = fetch_active_trades()
+    
+    if not trades:
+        print("No active trades found in Database.")
+        return
+
+    print(f"\n{'='*100}")
+    print(f"{'ACTIVE TRADES (Bot Perspective)':^100}")
+    print(f"{'='*100}")
+    print(f"{'Time':<20} | {'Status':<15} | {'Market':<20} | {'Action':<5} | {'Entry':<10} | {'Plan Type':<15}")
+    print("-" * 100)
+    
+    for t in trades:
+        ts = t['timestamp'].split('T')[1].split('.')[0] if 'T' in t['timestamp'] else t['timestamp']
+        status = t['outcome']
+        market = t['epic']
+        action = t['action']
+        entry = str(t['entry'])
+        plan_type = t.get('entry_type', 'N/A')
+        
+        # Color coding if supported
+        status_str = status
+        if sys.stdout.isatty():
+            if status == "PENDING":
+                status_str = f"\033[93m{status}\033[0m" # Yellow
+            elif "PLACED" in status:
+                status_str = f"\033[92m{status}\033[0m" # Green
+        
+        print(f"{ts:<20} | {status_str:<15} | {market:<20} | {action:<5} | {entry:<10} | {plan_type:<15}")
+    print(f"{'='*100}\n")
+
 def run_post_mortem(deal_id: str):
     """
     Runs a post-mortem analysis for a specific deal ID.
@@ -502,7 +538,8 @@ def main():
     parser.add_argument("--with-rating", action="store_true", help="When using --news-check, ask Gemini to rate the relevance/quality of the news (consumes API tokens).")
     parser.add_argument("--post-mortem", type=str, help="Run post-mortem analysis on a specific deal ID.")
     parser.add_argument("--monitor-trade", type=str, help="Start 'Monitor & Manage' process for a specific active Deal ID.")
-    parser.add_argument("--list-open", action="store_true", help="List all currently open positions and their Deal IDs.")
+    parser.add_argument("--list-open", action="store_true", help="List all currently open positions and their Deal IDs (from IG).")
+    parser.add_argument("--list-active", action="store_true", help="List active bot strategies (PENDING triggers and PLACED trades) from DB.")
     parser.add_argument("--recent-trades", type=int, nargs="?", const=5, help="Print N recent trades. Defaults to 5 if no number provided.")
     parser.add_argument("--scorecard", action="store_true", help="Generate a comprehensive performance scorecard from the database.")
     parser.add_argument("--volatility-check", action="store_true", help="Check current market volatility (Range/ATR) for the selected market/epic.")
@@ -553,6 +590,10 @@ def main():
 
     if args.list_open:
         run_list_open_positions()
+        return
+
+    if args.list_active:
+        run_list_active_trades()
         return
 
     if args.scorecard:
