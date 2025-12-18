@@ -232,7 +232,7 @@ class IGClient:
                 expiry="DFB", # DFB for Daily Funded Bet (Spread Bet)
                 force_open=True,
                 guaranteed_stop=False,
-                level=level, # Usually None for Market orders
+                level=None, # MARKET orders execute at current price, level must be None
                 limit_level=limit_level,
                 limit_distance=None,
                 order_type="MARKET",
