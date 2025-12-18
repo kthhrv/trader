@@ -293,6 +293,7 @@ class State(rx.State):
             # Add Horizontal Lines (Entry, SL, TP)
             entry = float(trade.get("entry", 0))
             sl = float(trade.get("stop_loss", 0))
+            init_sl = float(trade.get("initial_stop_loss", 0) or 0)
             tp = float(trade.get("take_profit", 0) or 0)  # Handle None
 
             if entry > 0:
@@ -304,7 +305,17 @@ class State(rx.State):
                 )
             if sl > 0:
                 fig.add_hline(
-                    y=sl, line_dash="dash", line_color="orange", annotation_text="SL"
+                    y=sl,
+                    line_dash="dash",
+                    line_color="orange",
+                    annotation_text="Curr SL",
+                )
+            if init_sl > 0 and init_sl != sl:
+                fig.add_hline(
+                    y=init_sl,
+                    line_dash="dot",
+                    line_color="darkorange",
+                    annotation_text="Init SL",
                 )
             if tp > 0:
                 fig.add_hline(
@@ -371,7 +382,7 @@ class State(rx.State):
             "entry": 7500,
             "exit_price": 7535,  # Added exit price
             "initial_stop_loss": 7480,
-            "stop_loss": 7480,
+            "stop_loss": 7495,  # Moved up
             "take_profit": 7540,
             "outcome": "WIN",
             "pnl": 200.0,
@@ -505,8 +516,15 @@ class State(rx.State):
             y=mock_trade["stop_loss"],
             line_dash="dash",
             line_color="orange",
-            annotation_text="SL (7480)",
+            annotation_text=f"Curr SL ({mock_trade['stop_loss']})",
         )
+        if mock_trade["initial_stop_loss"] != mock_trade["stop_loss"]:
+            fig.add_hline(
+                y=mock_trade["initial_stop_loss"],
+                line_dash="dot",
+                line_color="darkorange",
+                annotation_text=f"Init SL ({mock_trade['initial_stop_loss']})",
+            )
         fig.add_hline(
             y=mock_trade["take_profit"],
             line_dash="dash",
