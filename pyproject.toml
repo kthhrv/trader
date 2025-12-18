@@ -29,3 +29,8 @@ dev = [
 members = [
     "web_ui",
 ]
+
+[tool.pytest.ini_options]
+markers = [
+    "integration: marks tests as integration tests",
+]
