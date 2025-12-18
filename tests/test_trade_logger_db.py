@@ -46,8 +46,9 @@ class TestTradeLoggerDB(unittest.TestCase):
         params = args[1]
         self.assertEqual(params[1], "TEST")  # epic
         self.assertEqual(params[3], "INSTANT")  # entry_type
-        self.assertEqual(params[12], 5.0)  # atr (shifted)
-        self.assertEqual(params[14], "DEAL123")  # deal_id (shifted)
+        self.assertEqual(params[12], 1.5)  # spread_at_entry
+        self.assertEqual(params[13], 5.0)  # atr
+        self.assertEqual(params[15], "DEAL123")  # deal_id
 
         mock_conn.commit.assert_called_once()
         mock_conn.close.assert_called_once()
