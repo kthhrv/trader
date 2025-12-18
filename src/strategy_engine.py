@@ -155,6 +155,15 @@ class StrategyEngine:
             # 5. Get Analysis
             signal = self.analyst.analyze_market(market_context, strategy_name=self.strategy_name)
             
+            # Fetch current spread for logging context
+            current_spread = 0.0
+            try:
+                market_info = self.client.get_market_info(self.epic)
+                if market_info and 'snapshot' in market_info:
+                    current_spread = round(abs(float(market_info['snapshot']['offer']) - float(market_info['snapshot']['bid'])), 2)
+            except:
+                pass
+
             if signal:
                 # Ensure the ATR from analysis is correctly populated in the signal for later checks
                 if signal.atr is None: # If Gemini doesn't provide it, use our calculated one
@@ -164,6 +173,14 @@ class StrategyEngine:
                 if signal.action != Action.WAIT:
                     if not self._validate_plan(signal):
                         logger.warning("PLAN RESULT: Gemini plan failed safety validation. Treating as WAIT.")
+                        self.trade_logger.log_trade(
+                            epic=self.epic,
+                            plan=signal,
+                            outcome="REJECTED_SAFETY",
+                            spread_at_entry=current_spread,
+                            is_dry_run=self.dry_run,
+                            entry_type=signal.entry_type.value if signal.entry_type else "UNKNOWN"
+                        )
                         self.active_plan = None
                         return
 
@@ -172,10 +189,38 @@ class StrategyEngine:
                     logger.info(f"PLAN GENERATED: {signal.action} {signal.size} at {signal.entry} (Stop: {signal.stop_loss}, TP: {signal.take_profit}) Conf: {signal.confidence} Type: {signal.entry_type.value}")
                 else:
                     logger.info("PLAN RESULT: Gemini advised WAIT.")
+                    self.trade_logger.log_trade(
+                        epic=self.epic,
+                        plan=signal,
+                        outcome="WAIT",
+                        spread_at_entry=current_spread,
+                        is_dry_run=self.dry_run,
+                        entry_type=signal.entry_type.value if signal.entry_type else "UNKNOWN"
+                    )
                     self.active_plan = None
                 logger.info(f"reasoning: {signal.reasoning}")
             else:
                 logger.warning("PLAN RESULT: Gemini signal generation failed.")
+                # Log AI error as a "WAIT" with error reasoning for tracking
+                error_signal = TradingSignal(
+                    ticker=self.epic,
+                    action=Action.WAIT,
+                    entry=0.0,
+                    stop_loss=0.0,
+                    take_profit=0.0,
+                    confidence="none",
+                    reasoning="AI Analysis failed to generate a response.",
+                    size=0.0,
+                    atr=0.0,
+                    entry_type=EntryType.INSTANT
+                )
+                self.trade_logger.log_trade(
+                    epic=self.epic,
+                    plan=error_signal,
+                    outcome="AI_ERROR",
+                    spread_at_entry=current_spread,
+                    is_dry_run=self.dry_run
+                )
                 self.active_plan = None
                 
         except Exception as e:

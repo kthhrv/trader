@@ -17,6 +17,7 @@ from src.gemini_analyst import GeminiAnalyst, TradingSignal, Action, EntryType #
 from src.ig_client import IGClient
 from src.trade_monitor_db import TradeMonitorDB
 from src.stream_manager import StreamManager
+from src.scorecard import generate_scorecard
 
 # Configure Logging
 logging.basicConfig(
@@ -54,6 +55,30 @@ MARKET_CONFIGS = {
         "schedule": {"day_of_week": 'mon-fri', "hour": 8, "minute": 55, "timezone": 'Asia/Tokyo'},
         "timeout_seconds": 5400, # 90 minutes
         "max_spread": 8.0
+    },
+    "germany": {
+        "epic": "IX.D.DAX.DAILY.IP",
+        "strategy_name": "DAX OPEN",
+        "news_query": "DAX 40 German Economy",
+        "schedule": {"day_of_week": 'mon-fri', "hour": 7, "minute": 55, "timezone": 'Europe/London'},
+        "timeout_seconds": 5400,
+        "max_spread": 2.5
+    },
+    "australia": {
+        "epic": "IX.D.ASX.DAILY.IP",
+        "strategy_name": "ASX OPEN",
+        "news_query": "ASX 200 Australia Economy",
+        "schedule": {"day_of_week": 'mon-fri', "hour": 9, "minute": 55, "timezone": 'Australia/Sydney'},
+        "timeout_seconds": 5400,
+        "max_spread": 3.0
+    },
+    "us_tech": {
+        "epic": "IX.D.NASDAQ.DAILY.IP",
+        "strategy_name": "NASDAQ OPEN",
+        "news_query": "Nasdaq 100 US Tech Sector",
+        "schedule": {"day_of_week": 'mon-fri', "hour": 9, "minute": 25, "timezone": 'America/New_York'},
+        "timeout_seconds": 5400,
+        "max_spread": 2.0
     }
 }
 
@@ -393,6 +418,18 @@ def run_nikkei_strategy(dry_run: bool = False):
     config = MARKET_CONFIGS["nikkei"]
     run_strategy(config["epic"], config["strategy_name"], news_query=config["news_query"], dry_run=dry_run, timeout_seconds=config["timeout_seconds"], max_spread=config["max_spread"])
 
+def run_germany_strategy(dry_run: bool = False):
+    config = MARKET_CONFIGS["germany"]
+    run_strategy(config["epic"], config["strategy_name"], news_query=config["news_query"], dry_run=dry_run, timeout_seconds=config["timeout_seconds"], max_spread=config["max_spread"])
+
+def run_australia_strategy(dry_run: bool = False):
+    config = MARKET_CONFIGS["australia"]
+    run_strategy(config["epic"], config["strategy_name"], news_query=config["news_query"], dry_run=dry_run, timeout_seconds=config["timeout_seconds"], max_spread=config["max_spread"])
+
+def run_us_tech_strategy(dry_run: bool = False):
+    config = MARKET_CONFIGS["us_tech"]
+    run_strategy(config["epic"], config["strategy_name"], news_query=config["news_query"], dry_run=dry_run, timeout_seconds=config["timeout_seconds"], max_spread=config["max_spread"])
+
 def graceful_shutdown(signum, frame):
     logger.info("Shutdown signal received. Exiting...")
     sys.exit(0)
@@ -405,6 +442,7 @@ def main():
     parser.add_argument("--post-mortem", type=str, help="Run post-mortem analysis on a specific deal ID.")
     parser.add_argument("--monitor-trade", type=str, help="Start 'Monitor & Manage' process for a specific active Deal ID.")
     parser.add_argument("--recent-trades", type=int, nargs="?", const=5, help="Print N recent trades. Defaults to 5 if no number provided.")
+    parser.add_argument("--scorecard", action="store_true", help="Generate a comprehensive performance scorecard from the database.")
     parser.add_argument("--volatility-check", action="store_true", help="Check current market volatility (Range/ATR) for the selected market/epic.")
     parser.add_argument("--test-trade", action="store_true", help="Execute an immediate test trade (BUY/SELL) with minimal size/stops. Requires --epic or --market.")
     parser.add_argument("--test-trade-action", type=str, choices=["BUY", "SELL"], default="BUY", help="Action for --test-trade: 'BUY' or 'SELL'. Defaults to BUY.")
@@ -449,6 +487,10 @@ def main():
 
     if args.monitor_trade:
         run_monitor_trade(args.monitor_trade)
+        return
+
+    if args.scorecard:
+        generate_scorecard()
         return
 
     if args.recent_trades is not None:

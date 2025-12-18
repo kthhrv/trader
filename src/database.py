@@ -156,6 +156,23 @@ def fetch_recent_trades(limit: int = 5, db_path=None):
     finally:
         conn.close()
 
+def fetch_all_trade_logs(db_path=None):
+    """
+    Fetches ALL trade log entries for scorecard analysis.
+    Returns a list of dictionaries.
+    """
+    conn = get_db_connection(db_path)
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT * FROM trade_log ORDER BY timestamp ASC")
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+    except Exception as e:
+        logger.error(f"Failed to fetch all trade logs: {e}")
+        return []
+    finally:
+        conn.close()
+
 if __name__ == "__main__":
     # Configure logging if run directly
     logging.basicConfig(level=logging.INFO)
