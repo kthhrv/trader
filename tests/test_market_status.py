@@ -20,10 +20,13 @@ class TestMarketStatus(unittest.TestCase):
         self.patcher_australia = patch("src.market_status.holidays.Australia")
         self.mock_au_holidays_cls = self.patcher_australia.start()
 
+        self.patcher_germany = patch("src.market_status.holidays.Germany")
+        self.mock_de_holidays_cls = self.patcher_germany.start()
+
         # Patch datetime.now()
         self.patcher_datetime = patch("src.market_status.datetime")
         self.mock_datetime = self.patcher_datetime.start()
-        # Ensure it behaves like a real datetime for basic attributes if needed
+        # Default mock value
         self.mock_datetime.now.return_value = datetime(2025, 1, 1, tzinfo=pytz.UTC)
 
         # Now instantiate MarketStatus (it will use the patched classes)
@@ -34,11 +37,10 @@ class TestMarketStatus(unittest.TestCase):
         self.patcher_nyse.stop()
         self.patcher_japan.stop()
         self.patcher_australia.stop()
+        self.patcher_germany.stop()
         self.patcher_datetime.stop()
 
     def test_is_holiday_uk(self):
-        # Mocking datetime.now(tz)
-        # In UK, date should be the same as mocked UTC now
         mock_now = datetime(2025, 12, 25, 10, 0, tzinfo=pytz.UTC)
         self.mock_datetime.now.return_value = mock_now
         self.mock_uk_holidays_cls.return_value.__contains__.return_value = True
@@ -54,7 +56,6 @@ class TestMarketStatus(unittest.TestCase):
         self.mock_nyse_holidays_cls.return_value.__contains__.return_value = True
 
         self.assertTrue(self.market_status.is_holiday("IX.D.SPTRD.DAILY.IP"))
-        # 15:00 UTC is 11:00 AM NY (Same day)
         self.mock_nyse_holidays_cls.return_value.__contains__.assert_called_with(
             date(2025, 7, 4)
         )
@@ -65,7 +66,6 @@ class TestMarketStatus(unittest.TestCase):
         self.mock_japan_holidays_cls.return_value.__contains__.return_value = True
 
         self.assertTrue(self.market_status.is_holiday("IX.D.NIKKEI.DAILY.IP"))
-        # 10:00 UTC is 19:00 Japan (Same day)
         self.mock_japan_holidays_cls.return_value.__contains__.assert_called_with(
             date(2025, 1, 1)
         )
@@ -76,43 +76,34 @@ class TestMarketStatus(unittest.TestCase):
         self.mock_au_holidays_cls.return_value.__contains__.return_value = True
 
         self.assertTrue(self.market_status.is_holiday("IX.D.ASX.DAILY.IP"))
-        # 10:00 UTC is 21:00 Sydney (Same day)
         self.mock_au_holidays_cls.return_value.__contains__.assert_called_with(
             date(2025, 1, 26)
         )
 
     def test_is_holiday_germany(self):
-        # Using specific logic for Germany if implemented, currently default False
-        # But we can verify it doesn't crash and checks logic if we add a DE calendar later
-        # For now, just checking it returns False as per current implementation
-        mock_now = datetime(2025, 12, 25, 10, 0, tzinfo=pytz.UTC)
+        mock_now = datetime(2025, 10, 3, 10, 0, tzinfo=pytz.UTC)
         self.mock_datetime.now.return_value = mock_now
+        self.mock_de_holidays_cls.return_value.__contains__.return_value = True
 
-        # Current implementation hardcodes False for DE
-        self.assertFalse(self.market_status.is_holiday("IX.D.DAX.DAILY.IP"))
+        self.assertTrue(self.market_status.is_holiday("IX.D.DAX.DAILY.IP"))
+        self.mock_de_holidays_cls.return_value.__contains__.assert_called_with(
+            date(2025, 10, 3)
+        )
 
     def test_is_holiday_date_rollover_australia(self):
-        # MONDAY 11:00 PM UK (23:00 UTC)
-        # This is TUESDAY morning in Australia (10:00 AM Sydney)
+        # MONDAY 11:00 PM UK (23:00 UTC) -> TUESDAY morning in Sydney
         mock_now_utc = datetime(2025, 1, 20, 23, 0, tzinfo=pytz.UTC)
         self.mock_datetime.now.side_effect = lambda tz: mock_now_utc.astimezone(tz)
 
-        # We want to check if the holiday check is performed for TUESDAY (21st)
         self.mock_au_holidays_cls.return_value.__contains__.return_value = True
-
         self.assertTrue(self.market_status.is_holiday("IX.D.ASX.DAILY.IP"))
 
-        # Verify it checked for the 21st, not the 20th
         self.mock_au_holidays_cls.return_value.__contains__.assert_called_with(
             date(2025, 1, 21)
         )
 
     def test_is_holiday_unsupported_epic(self):
         self.assertFalse(self.market_status.is_holiday("UNSUPPORTED.EPIC"))
-
-
-if __name__ == "__main__":
-    unittest.main()
 
 
 if __name__ == "__main__":

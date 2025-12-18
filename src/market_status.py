@@ -23,6 +23,7 @@ class MarketStatus:
 
         self.jp_holidays = holidays.Japan()
         self.au_holidays = holidays.Australia()
+        self.de_holidays = holidays.Germany()
 
     def _get_country_code(self, epic: str) -> Optional[str]:
         """
@@ -93,9 +94,9 @@ class MarketStatus:
                 is_hol = True
                 holiday_name = self.jp_holidays.get(target_date)
         elif country_code == "DE":
-            # For now, default German holidays to False unless a specific library is used
-            is_hol = False
-            holiday_name = "German Public Holiday (Not checked)"
+            if target_date in self.de_holidays:
+                is_hol = True
+                holiday_name = self.de_holidays.get(target_date)
         elif country_code == "AU":
             if target_date in self.au_holidays:
                 is_hol = True
