@@ -81,6 +81,10 @@ class NewsFetcher:
             return "EURUSD=X"
         elif "dax" in q:
             return "^GDAXI"
+        elif "nasdaq" in q or "tech" in q:
+            return "^NDX"
+        elif "asx" in q or "australia" in q:
+            return "^AXJO"
         return None
 
 if __name__ == "__main__":

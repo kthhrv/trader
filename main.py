@@ -439,6 +439,7 @@ def main():
     parser.add_argument("--now", action="store_true", help="Run the strategy immediately and exit")
     parser.add_argument("--dry-run", action="store_true", help="Execute strategy without placing actual orders (used with --now)")
     parser.add_argument("--news-only", action="store_true", help="Only fetch and print news for the selected market/query then exit")
+    parser.add_argument("--news-check", action="store_true", help="Run a health check on news fetching for all configured markets.")
     parser.add_argument("--post-mortem", type=str, help="Run post-mortem analysis on a specific deal ID.")
     parser.add_argument("--monitor-trade", type=str, help="Start 'Monitor & Manage' process for a specific active Deal ID.")
     parser.add_argument("--recent-trades", type=int, nargs="?", const=5, help="Print N recent trades. Defaults to 5 if no number provided.")
@@ -512,6 +513,38 @@ def main():
             print(fetcher.fetch_news(query))
         else:
             logger.error("No query provided. Use --market, --news-query, or --epic.")
+        return
+
+    if args.news_check:
+        logger.info("Running News Health Check for all markets...")
+        fetcher = NewsFetcher()
+        print(f"\n{'='*80}")
+        print(f"{'NEWS HEALTH CHECK':^80}")
+        print(f"{'='*80}")
+        
+        passed = 0
+        failed = 0
+        
+        for market, config in MARKET_CONFIGS.items():
+            query = config["news_query"]
+            print(f"\nChecking [{market.upper()}] Query: '{query}'...")
+            try:
+                result = fetcher.fetch_news(query, limit=3)
+                if "No recent news found" in result:
+                    print(f"  [WARN] No news returned.")
+                    failed += 1
+                else:
+                    # Extract first headline for verification
+                    lines = result.split('\n')
+                    first_headline = next((l for l in lines if l.startswith('1. ')), "No headline found")
+                    print(f"  [PASS] {len(lines)-2} items retrieved.")
+                    print(f"  Sample: {first_headline[:70]}...")
+                    passed += 1
+            except Exception as e:
+                print(f"  [FAIL] Exception: {e}")
+                failed += 1
+        
+        print(f"\nSummary: {passed} Passed, {failed} Failed.")
         return
 
     if args.now:
