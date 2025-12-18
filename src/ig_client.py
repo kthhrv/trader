@@ -315,46 +315,6 @@ class IGClient:
             logger.error(f"Error fetching position {deal_id}: {e}")
             return None
 
-    def place_working_order(self, epic: str, direction: str, order_type: str, size: float, level: float, stop_level: float, limit_level: float = None):
-        if not self.authenticated:
-            self.authenticate()
-
-        if size <= 0:
-            raise ValueError("Size must be positive.")
-        
-        currency_code = 'GBP' 
-        
-        try:
-            # Use self.service
-            response = self.service.create_working_order(
-                currency_code=currency_code,
-                direction=direction,
-                epic=epic,
-                expiry='DFB', 
-                guaranteed_stop=False,
-                level=level, 
-                size=size,
-                time_in_force='GOOD_TILL_CANCELLED', 
-                order_type=order_type,
-                limit_level=limit_level,
-                stop_level=stop_level
-            )
-            
-            deal_ref = response['dealReference']
-            confirmation = self.service.fetch_deal_by_deal_reference(deal_ref)
-            
-            if confirmation['dealStatus'] == 'ACCEPTED':
-                logger.info(f"Working Order ACCEPTED: {deal_ref}")
-                return response
-            else:
-                reason = confirmation.get('reason', 'Unknown')
-                logger.error(f"Working Order REJECTED: {reason}")
-                raise Exception(f"Order rejected: {reason}")
-
-        except Exception as e:
-            logger.error(f"Working Order placement failed: {e}")
-            raise
-
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=10),
