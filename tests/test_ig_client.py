@@ -152,6 +152,39 @@ def test_place_spread_bet_order_success(mock_ig_service):
         trailing_stop_increment=None
     )
 
+def test_place_spread_bet_order_ignores_level_for_market_orders(mock_ig_service):
+    """
+    Regression Test: Ensure that even if a 'level' is passed (e.g. by StrategyEngine),
+    it is forced to None for MARKET orders to avoid IG API validation errors.
+    """
+    mock_instance = MagicMock()
+    mock_ig_service.return_value = mock_instance
+    
+    mock_instance.create_open_position.return_value = {'dealReference': 'REF123'}
+    mock_instance.fetch_deal_by_deal_reference.return_value = {
+        'dealStatus': 'ACCEPTED', 
+        'dealReference': 'REF123',
+        'dealId': 'DEAL456'
+    }
+
+    client = IGClient()
+    client.authenticated = True
+    
+    # Act: Call with an explicit level (e.g. 7500)
+    client.place_spread_bet_order(
+        epic="CS.D.FTSE.TODAY.IP",
+        direction="BUY",
+        size=1,
+        stop_level=7450,
+        level=7500 # Explicit level provided
+    )
+    
+    # Assert: Verify that create_open_position received level=None
+    mock_instance.create_open_position.assert_called_once()
+    call_args = mock_instance.create_open_position.call_args[1]
+    assert call_args['order_type'] == 'MARKET'
+    assert call_args['level'] is None # Crucial check
+
 def test_close_open_position_success(mock_ig_service):
     mock_instance = MagicMock()
     mock_ig_service.return_value = mock_instance
