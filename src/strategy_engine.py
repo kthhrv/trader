@@ -1,6 +1,5 @@
 import logging
 import time
-import uuid
 import threading
 from typing import Optional
 from datetime import datetime
@@ -329,14 +328,11 @@ class StrategyEngine:
                 if (time.time() - start_time) > timeout_seconds:
                     logger.info(f"Strategy for {self.epic} timed out after {timeout_seconds}s. No trade executed.")
                     
-                    # Generate a synthetic deal_id for post-mortem analysis
-                    synthetic_deal_id = f"TIMEOUT_{uuid.uuid4().hex[:8]}"
-                    
                     if self.active_plan_id:
                         self.trade_logger.update_trade_status(
                             row_id=self.active_plan_id,
                             outcome="TIMED_OUT",
-                            deal_id=synthetic_deal_id
+                            deal_id=None
                         )
                     else:
                         # Log the timeout event to DB (Fallback)
@@ -346,7 +342,7 @@ class StrategyEngine:
                             outcome="TIMED_OUT",
                             spread_at_entry=0.0,
                             is_dry_run=self.dry_run,
-                            deal_id=synthetic_deal_id,
+                            deal_id=None,
                             entry_type=self.active_plan.entry_type.value if self.active_plan.entry_type else "UNKNOWN"
                         )
                     

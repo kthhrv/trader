@@ -255,7 +255,7 @@ def test_poll_market_no_trigger(mock_components):
     mock_trade_logger.log_trade.assert_called_once()
     args, kwargs = mock_trade_logger.log_trade.call_args
     assert kwargs['outcome'] == "TIMED_OUT"
-    assert kwargs['deal_id'].startswith("TIMEOUT_")
+    assert kwargs['deal_id'] is None
 
     mock_trade_monitor.monitor_trade.assert_not_called()
     mock_stream_manager.stop.assert_called_once()
@@ -317,7 +317,7 @@ def test_place_market_order_spread_too_wide(mock_components, caplog):
         mock_trade_logger.log_trade.assert_called_once()
         args, kwargs = mock_trade_logger.log_trade.call_args
         assert kwargs['outcome'] == "TIMED_OUT"
-        assert kwargs['deal_id'].startswith("TIMEOUT_")
+        assert kwargs['deal_id'] is None
         
         mock_trade_monitor.monitor_trade.assert_not_called()
         mock_stream_manager.stop.assert_called_once()

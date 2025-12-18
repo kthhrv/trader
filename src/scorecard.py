@@ -32,8 +32,10 @@ def get_scorecard_data():
     ai_errors = len(df[df['outcome'] == 'AI_ERROR'])
     rejected = len(df[df['outcome'] == 'REJECTED_SAFETY'])
     
-    trade_df = df[df['outcome'].str.contains('PLACED') | df['pnl'].notnull() | df['outcome'].isin(['WIN', 'LOSS', 'TIMED_OUT'])]
-    trade_df = trade_df[~trade_df['deal_id'].astype(str).str.startswith('TIMEOUT')]
+    # Total Trades Taken: Any row that was actually PLACED or CLOSED.
+    # We exclude: WAIT, AI_ERROR, REJECTED_SAFETY, PENDING, and TIMED_OUT.
+    # Note: TIMED_OUT is a 'stalking event' that never resulted in a trade.
+    trade_df = df[df['outcome'].str.contains('PLACED') | df['outcome'].isin(['WIN', 'LOSS', 'CLOSED'])]
     total_trades = len(trade_df)
     
     closed_df = trade_df[trade_df['pnl'].notnull()].copy()
