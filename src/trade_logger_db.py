@@ -53,8 +53,40 @@ class TradeLoggerDB:
             ))
             
             conn.commit()
+            row_id = cursor.lastrowid # Get the ID of the inserted row
             conn.close()
-            logger.info(f"Logged trade for {epic} with outcome: {outcome} (Deal ID: {deal_id})")
+            logger.info(f"Logged trade for {epic} with outcome: {outcome} (Deal ID: {deal_id}, Row ID: {row_id})")
+            return row_id
             
         except Exception as e:
             logger.error(f"Failed to log trade to DB for {epic}: {e}")
+            return None
+
+    def update_trade_status(self, row_id: int, outcome: str, deal_id: str = None):
+        """
+        Updates the status/outcome of an existing trade log entry.
+        Used to transition a trade from 'PENDING' to 'LIVE_PLACED' or 'TIMED_OUT'.
+        """
+        try:
+            conn = get_db_connection(self.db_path)
+            cursor = conn.cursor()
+            
+            if deal_id:
+                cursor.execute('''
+                    UPDATE trade_log 
+                    SET outcome = ?, deal_id = ?
+                    WHERE id = ?
+                ''', (outcome, deal_id, row_id))
+            else:
+                cursor.execute('''
+                    UPDATE trade_log 
+                    SET outcome = ?
+                    WHERE id = ?
+                ''', (outcome, row_id))
+            
+            conn.commit()
+            conn.close()
+            logger.info(f"Updated trade outcome for Row ID {row_id} to: {outcome} (Deal ID: {deal_id})")
+            
+        except Exception as e:
+            logger.error(f"Failed to update trade status for Row ID {row_id}: {e}")

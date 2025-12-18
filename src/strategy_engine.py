@@ -187,6 +187,16 @@ class StrategyEngine:
                 if signal.action != Action.WAIT:
                     self.active_plan = signal
                     logger.info(f"PLAN GENERATED: {signal.action} {signal.size} at {signal.entry} (Stop: {signal.stop_loss}, TP: {signal.take_profit}) Conf: {signal.confidence} Type: {signal.entry_type.value}")
+                    
+                    # Log as PENDING immediately
+                    self.active_plan_id = self.trade_logger.log_trade(
+                        epic=self.epic,
+                        plan=signal,
+                        outcome="PENDING",
+                        spread_at_entry=current_spread,
+                        is_dry_run=self.dry_run,
+                        entry_type=signal.entry_type.value if signal.entry_type else "UNKNOWN"
+                    )
                 else:
                     logger.info("PLAN RESULT: Gemini advised WAIT.")
                     self.trade_logger.log_trade(
@@ -322,16 +332,23 @@ class StrategyEngine:
                     # Generate a synthetic deal_id for post-mortem analysis
                     synthetic_deal_id = f"TIMEOUT_{uuid.uuid4().hex[:8]}"
                     
-                    # Log the timeout event to DB
-                    self.trade_logger.log_trade(
-                        epic=self.epic,
-                        plan=self.active_plan,
-                        outcome="TIMED_OUT",
-                        spread_at_entry=0.0,
-                        is_dry_run=self.dry_run,
-                        deal_id=synthetic_deal_id,
-                        entry_type=self.active_plan.entry_type.value if self.active_plan.entry_type else "UNKNOWN"
-                    )
+                    if self.active_plan_id:
+                        self.trade_logger.update_trade_status(
+                            row_id=self.active_plan_id,
+                            outcome="TIMED_OUT",
+                            deal_id=synthetic_deal_id
+                        )
+                    else:
+                        # Log the timeout event to DB (Fallback)
+                        self.trade_logger.log_trade(
+                            epic=self.epic,
+                            plan=self.active_plan,
+                            outcome="TIMED_OUT",
+                            spread_at_entry=0.0,
+                            is_dry_run=self.dry_run,
+                            deal_id=synthetic_deal_id,
+                            entry_type=self.active_plan.entry_type.value if self.active_plan.entry_type else "UNKNOWN"
+                        )
                     
                     break # Exit loop on timeout
                 
@@ -593,16 +610,24 @@ class StrategyEngine:
 
             self.position_open = True # Set to True even in dry run to stop polling
 
-            # Log the placed trade FIRST (Insert)
-            self.trade_logger.log_trade(
-                epic=self.epic,
-                plan=plan,
-                outcome=outcome,
-                spread_at_entry=current_spread,
-                is_dry_run=dry_run,
-                deal_id=deal_id,
-                entry_type=plan.entry_type.value if plan.entry_type else "UNKNOWN"
-            )
+            if self.active_plan_id:
+                # Update existing PENDING record
+                self.trade_logger.update_trade_status(
+                    row_id=self.active_plan_id,
+                    outcome=outcome,
+                    deal_id=deal_id
+                )
+            else:
+                # Fallback: Log fresh if no pending ID (e.g. Test Trade)
+                self.trade_logger.log_trade(
+                    epic=self.epic,
+                    plan=plan,
+                    outcome=outcome,
+                    spread_at_entry=current_spread,
+                    is_dry_run=dry_run,
+                    deal_id=deal_id,
+                    entry_type=plan.entry_type.value if plan.entry_type else "UNKNOWN"
+                )
 
             # Start Monitoring (Update upon close) - Blocking call
             if not dry_run and deal_id:

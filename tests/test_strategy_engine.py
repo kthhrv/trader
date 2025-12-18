@@ -161,6 +161,8 @@ def test_poll_market_triggers_buy(mock_components):
         entry_type="INSTANT", use_trailing_stop=True
     )
     engine.active_plan = plan_to_trigger
+    # Manually ensure attribute exists for test
+    engine.active_plan_id = None
     
     # Mock successful trade placement return with dealId to trigger monitoring
     mock_client.place_spread_bet_order.return_value = {'dealId': 'TEST_DEAL_ID', 'dealStatus': 'ACCEPTED'}
@@ -225,6 +227,7 @@ def test_poll_market_no_trigger(mock_components):
         take_profit=7600, confidence="high", reasoning="Test", size=1, atr=15.0,
         entry_type="INSTANT", use_trailing_stop=True
     )
+    engine.active_plan_id = None
     
     # Set initial current prices
     engine.current_bid = 7490.0
@@ -268,6 +271,7 @@ def test_place_market_order_spread_too_wide(mock_components, caplog):
         entry_type="INSTANT", use_trailing_stop=True
     )
     engine.active_plan = plan_to_trigger
+    engine.active_plan_id = None
 
     # Mock fetch_market_by_epic is still needed for _place_market_order's spread check (even if skipped by policy)
     # It's also used in TradeMonitorDB if position not found
@@ -329,6 +333,7 @@ def test_place_market_order_stop_too_tight(mock_components, caplog):
         entry_type="INSTANT", use_trailing_stop=True
     )
     engine.active_plan = plan_to_trigger
+    engine.active_plan_id = None
 
     # Mock fetch_market_by_epic to allow trade placement (acceptable spread)
     mock_client.service.fetch_market_by_epic.return_value = {
@@ -387,6 +392,7 @@ def test_place_market_order_dry_run(mock_components, caplog):
         entry_type="INSTANT", use_trailing_stop=True
     )
     engine.active_plan = plan_to_trigger
+    engine.active_plan_id = None
 
     # Mock fetch_market_by_epic to allow internal _place_market_order calls (e.g. spread check)
     mock_client.service.fetch_market_by_epic.return_value = {
