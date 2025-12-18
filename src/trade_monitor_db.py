@@ -96,7 +96,7 @@ class TradeMonitorDB:
 
 
 
-    def monitor_trade(self, deal_id: str, epic: str, entry_price: float = None, stop_loss: float = None, atr: float = None, polling_interval: int = None, max_duration: int = 14400, use_trailing_stop: bool = True):
+    def monitor_trade(self, deal_id: str, epic: str, entry_price: float = None, stop_loss: float = None, atr: float = None, polling_interval: int = None, use_trailing_stop: bool = True):
         """
         Monitors an active trade, manages stops (Breakeven/Trailing), and logs outcome.
         This version uses streaming updates for trade closure and polling for trailing stops.
@@ -115,7 +115,6 @@ class TradeMonitorDB:
         trade_closure_event = threading.Event()
         self._active_monitors[deal_id] = trade_closure_event
         
-        start_time = time.time()
         moved_to_breakeven = False
         risk_distance = abs(entry_price - stop_loss) if (entry_price and stop_loss) else 0
 
@@ -129,10 +128,6 @@ class TradeMonitorDB:
 
         try:
             while not trade_closure_event.is_set():
-                if time.time() - start_time > max_duration:
-                    logger.warning(f"Monitoring timed out for Deal ID: {deal_id} after {max_duration} seconds.")
-                    break # Exit loop on timeout
-
                 # --- Market Close Time Check ---
                 if market_close_dt:
                     now_tz = datetime.now(market_close_dt.tzinfo)
@@ -211,14 +206,12 @@ class TradeMonitorDB:
                 # Wait for next check or until event is set
                 trade_closure_event.wait(polling_interval)
             
-            # --- Trade has closed (either by stream event or timeout) ---
+            # --- Trade has closed ---
             final_status = "CLOSED"
             final_pnl = 0.0
             final_exit_price = 0.0
             
             # Attempt to fetch final details from history with retries.
-            # The streaming update is often faster than the REST API history update, 
-            # so we poll briefly to ensure we capture the closing transaction.
             for attempt in range(3):
                 # Give the IG backend a moment to index the transaction
                 time.sleep(2)
@@ -237,26 +230,17 @@ class TradeMonitorDB:
                         except ValueError:
                             current_pnl = 0.0
                         
-                        # Heuristic: If PnL is non-zero, it's likely the valid close. 
-                        # If 0.0, it might be the opening trade (stale) or a breakeven close.
-                        # We verify by checking if we found a likely candidate.
-                        
                         final_pnl = current_pnl
                         
                         if 'closeLevel' in latest_tx:
                             final_exit_price = float(latest_tx['closeLevel'])
                         elif 'level' in latest_tx: # Fallback
-                             final_exit_price = float(latest_tx['level'])
+                                final_exit_price = float(latest_tx['level'])
 
                         logger.info(f"History Fetch Attempt {attempt+1}: Found PnL={final_pnl}, Exit={final_exit_price}")
 
-                        # If we found a non-zero PnL, we are confident it's the close.
                         if final_pnl != 0.0:
                             break
-                        
-                        # If PnL is 0.0, we continue retrying to see if a 'better' record appears,
-                        # unless it's the last attempt, in which case we accept 0.0 (Breakeven).
-                        
                 except Exception as e:
                     logger.warning(f"History fetch attempt {attempt+1} failed for {deal_id}: {e}")
 
