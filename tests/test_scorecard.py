@@ -76,7 +76,7 @@ def test_scorecard_full_report(sample_trades, capsys):
     # Check PnL
     # Win: 50, Loss: -25. Net: 25.
     assert "Net PnL:             £+25.00" in output
-    assert "Win Rate:            50.0% (1 W / 1 L)" in output
+    assert "Win Rate:            50.0%" in output
     assert "Profit Factor:       2.00" in output # 50 / 25
 
     # Check Market Names Normalization

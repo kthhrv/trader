@@ -39,6 +39,7 @@ def e2e_mocks(temp_db_path):
     mock_trade_logger = TradeLoggerDB(db_path=temp_db_path)
     # Wrap log_trade with a mock to allow assertions while keeping functionality
     mock_trade_logger.log_trade = MagicMock(side_effect=mock_trade_logger.log_trade)
+    mock_trade_logger.update_trade_status = MagicMock(side_effect=mock_trade_logger.update_trade_status)
     
     mock_trade_monitor = TradeMonitorDB(client=mock_ig_client, stream_manager=mock_stream_manager, db_path=temp_db_path, polling_interval=0.1)
     # Wrap monitor_trade with a mock to allow assertions while keeping functionality
@@ -183,12 +184,22 @@ def test_e2e_trading_flow(e2e_mocks, caplog):
     assert not trade_execution_thread.is_alive()
     
     # Verify trade logger called for placement (AFTER monitoring finishes)
+    # 1. PENDING log (during generation)
     mock_trade_logger.log_trade.assert_called_once()
-    logged_trade_entry = mock_trade_logger.log_trade.call_args[1]
-    assert logged_trade_entry['epic'] == epic
-    assert logged_trade_entry['outcome'] == "LIVE_PLACED"
-    assert logged_trade_entry['deal_id'] == "MOCK_DEAL_ID"
-    assert logged_trade_entry['entry_type'] == engine.active_plan.entry_type.value
+    pending_call_args = mock_trade_logger.log_trade.call_args[1]
+    assert pending_call_args['outcome'] == "PENDING"
+    
+    # 2. LIVE_PLACED update (during execution)
+    mock_trade_logger.update_trade_status.assert_called_once()
+    update_call_args = mock_trade_logger.update_trade_status.call_args[1]
+    # In python 3.8+ call_args can be accessed by index or attribute, here we use index for kwargs
+    if not update_call_args: # fallback if using positional
+         update_call_kwargs = mock_trade_logger.update_trade_status.call_args.kwargs
+    else:
+         update_call_kwargs = update_call_args
+
+    assert update_call_kwargs['outcome'] == "LIVE_PLACED"
+    assert update_call_kwargs['deal_id'] == "MOCK_DEAL_ID"
     
     # Verify stream manager was stopped
     mock_stream_manager.stop.assert_called_once()

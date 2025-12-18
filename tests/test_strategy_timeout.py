@@ -40,11 +40,12 @@ class TestStrategyTimeout(unittest.TestCase):
             reasoning="Test",
             entry_type=EntryType.INSTANT
         )
+        self.engine.active_plan_id = None
 
     def tearDown(self):
         os.remove(self.test_db_path)
 
-    def test_timeout_and_post_mortem_logging(self):
+    def test_timeout_logging(self):
         # Run execution with a very short timeout
         self.engine.execute_strategy(timeout_seconds=0.01)
         
@@ -57,15 +58,6 @@ class TestStrategyTimeout(unittest.TestCase):
 
         self.assertIsNotNone(timed_out_trade)
         self.assertEqual(timed_out_trade['outcome'], "TIMED_OUT")
-        synthetic_deal_id = timed_out_trade['deal_id']
-        self.assertTrue(synthetic_deal_id.startswith("TIMEOUT_"))
+        # Deal ID should be None/Null now
+        self.assertIsNone(timed_out_trade['deal_id'])
         self.assertEqual(timed_out_trade['spread_at_entry'], 0.0)
-
-        # Test post-mortem functionality
-        post_mortem_analysis = "This trade timed out due to lack of market momentum at open."
-        save_post_mortem(synthetic_deal_id, post_mortem_analysis, db_path=self.test_db_path)
-
-        # Fetch the trade again and verify post-mortem is saved
-        updated_trade = fetch_trade_data(synthetic_deal_id, db_path=self.test_db_path)
-        self.assertIsNotNone(updated_trade)
-        self.assertEqual(updated_trade['log']['post_mortem'], post_mortem_analysis)

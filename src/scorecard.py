@@ -87,6 +87,17 @@ def get_scorecard_data():
             ).reset_index()
             stats["conf_stats"] = c_stats.to_dict('records')
 
+        # Entry Type Audit
+        if 'entry_type' in closed_df.columns:
+            # Normalize entry_type case
+            closed_df['entry_type'] = closed_df['entry_type'].astype(str).str.upper()
+            e_stats = closed_df.groupby('entry_type').agg(
+                Trades=('id', 'count'),
+                Win_Rate=('pnl', lambda x: (x > 0).mean() * 100),
+                Avg_PnL=('pnl', 'mean')
+            ).reset_index()
+            stats["entry_stats"] = e_stats.to_dict('records')
+
     return stats
 
 def generate_scorecard():
@@ -133,6 +144,14 @@ def generate_scorecard():
         print(df_c.to_string(index=False))
     else:
         print("Confidence data missing.")
+
+    # --- 5. Entry Type Audit ---
+    print(f"\n[ ENTRY TYPE AUDIT ]")
+    if "entry_stats" in stats and stats["entry_stats"]:
+        df_e = pd.DataFrame(stats["entry_stats"])
+        print(df_e.to_string(index=False))
+    else:
+        print("Entry Type data missing.")
 
     print("\n" + "="*60 + "\n")
 
