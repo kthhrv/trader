@@ -15,6 +15,7 @@ from src.database import (
     save_post_mortem,
     fetch_recent_trades,
     fetch_active_trades,
+    sync_active_trade,
 )
 from src.gemini_analyst import (
     GeminiAnalyst,
@@ -529,6 +530,21 @@ def run_monitor_trade(deal_id: str):
             f"Deal {deal_id} has no Stop Level. Monitoring might be limited."
         )
         stop_level = 0.0
+
+    size = float(position.get("size", 0))
+    limit_level = position.get("limitLevel")
+    take_profit = float(limit_level) if limit_level is not None else None
+
+    # Sync with DB (Ensure record exists and is up to date)
+    sync_active_trade(
+        deal_id=deal_id,
+        epic=epic,
+        direction=direction,
+        size=size,
+        entry=entry_price,
+        stop_loss=stop_level,
+        take_profit=take_profit,
+    )
 
     logger.info(
         f"Found Position: {epic} ({direction}) @ {entry_price}, Stop: {stop_level}"

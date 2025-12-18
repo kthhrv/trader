@@ -219,6 +219,80 @@ def fetch_active_trades(db_path=None):
         conn.close()
 
 
+def sync_active_trade(
+    deal_id: str,
+    epic: str,
+    direction: str,
+    size: float,
+    entry: float,
+    stop_loss: float,
+    take_profit: float,
+    db_path=None,
+):
+    """
+    Syncs the trade status in the DB with the live position.
+    If the trade exists, updates mutable fields.
+    If not, inserts a new record representing this active trade.
+    """
+    conn = get_db_connection(db_path)
+    cursor = conn.cursor()
+    try:
+        # Check if exists
+        cursor.execute("SELECT id FROM trade_log WHERE deal_id = ?", (deal_id,))
+        row = cursor.fetchone()
+
+        if row:
+            # Update existing
+            cursor.execute(
+                """
+                UPDATE trade_log
+                SET size = ?, entry = ?, stop_loss = ?, take_profit = ?, outcome = 'LIVE_PLACED'
+                WHERE deal_id = ?
+                """,
+                (size, entry, stop_loss, take_profit, deal_id),
+            )
+            logger.info(f"Updated existing DB record for Deal {deal_id}")
+        else:
+            # Insert new
+            from datetime import datetime
+
+            timestamp = datetime.now().isoformat()
+            cursor.execute(
+                """
+                INSERT INTO trade_log (
+                    timestamp, epic, action, entry_type, entry, stop_loss, take_profit,
+                    size, outcome, reasoning, confidence, spread_at_entry,
+                    atr, is_dry_run, deal_id, use_trailing_stop
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    timestamp,
+                    epic,
+                    direction,  # 'BUY' or 'SELL'
+                    "MANUAL_MONITOR",
+                    entry,
+                    stop_loss,
+                    take_profit,
+                    size,
+                    "LIVE_PLACED",
+                    "Resumed/Manual Monitor",
+                    "N/A",
+                    0.0,
+                    0.0,  # ATR unknown at this point
+                    False,  # Not dry run if we have a deal ID
+                    deal_id,
+                    True,  # Default to True for monitored trades
+                ),
+            )
+            logger.info(f"Inserted new DB record for Deal {deal_id}")
+
+        conn.commit()
+    except Exception as e:
+        logger.error(f"Failed to sync trade to DB: {e}")
+    finally:
+        conn.close()
+
+
 if __name__ == "__main__":
     # Configure logging if run directly
     logging.basicConfig(level=logging.INFO)
