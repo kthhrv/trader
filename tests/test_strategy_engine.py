@@ -123,7 +123,12 @@ def test_generate_plan_wait(mock_components, caplog):
     
     # Ensure no trade was attempted
     mock_client.place_spread_bet_order.assert_not_called()
-    mock_trade_logger.log_trade.assert_not_called()
+    
+    # Verify that the WAIT result was logged to DB
+    mock_trade_logger.log_trade.assert_called_once()
+    _, kwargs = mock_trade_logger.log_trade.call_args
+    assert kwargs['outcome'] == "WAIT"
+    
     mock_trade_monitor.monitor_trade.assert_not_called()
 
 def test_generate_plan_holiday(mock_components, caplog):
