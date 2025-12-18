@@ -440,6 +440,7 @@ def main():
     parser.add_argument("--dry-run", action="store_true", help="Execute strategy without placing actual orders (used with --now)")
     parser.add_argument("--news-only", action="store_true", help="Only fetch and print news for the selected market/query then exit")
     parser.add_argument("--news-check", action="store_true", help="Run a health check on news fetching for all configured markets.")
+    parser.add_argument("--with-rating", action="store_true", help="When using --news-check, ask Gemini to rate the relevance/quality of the news (consumes API tokens).")
     parser.add_argument("--post-mortem", type=str, help="Run post-mortem analysis on a specific deal ID.")
     parser.add_argument("--monitor-trade", type=str, help="Start 'Monitor & Manage' process for a specific active Deal ID.")
     parser.add_argument("--recent-trades", type=int, nargs="?", const=5, help="Print N recent trades. Defaults to 5 if no number provided.")
@@ -518,8 +519,12 @@ def main():
     if args.news_check:
         logger.info("Running News Health Check for all markets...")
         fetcher = NewsFetcher()
+        analyst = GeminiAnalyst() if args.with_rating else None
+        
         print(f"\n{'='*80}")
         print(f"{'NEWS HEALTH CHECK':^80}")
+        if args.with_rating:
+            print(f"{'(with AI Quality Audit)':^80}")
         print(f"{'='*80}")
         
         passed = 0
@@ -539,6 +544,18 @@ def main():
                     first_headline = next((l for l in lines if l.startswith('1. ')), "No headline found")
                     print(f"  [PASS] {len(lines)-2} items retrieved.")
                     print(f"  Sample: {first_headline[:70]}...")
+                    
+                    if analyst:
+                        print("  Running AI Audit...", end="", flush=True)
+                        quality = analyst.assess_news_quality(result, market)
+                        if quality:
+                            print(f"\r  [AI RATING] Score: {quality.score}/10 | Clarity: {quality.sentiment_clarity}")
+                            print(f"  Reasoning: {quality.reasoning}")
+                            if quality.score < 5:
+                                print(f"  [WARN] Low quality news detected.")
+                        else:
+                            print("\r  [AI ERROR] Could not rate news.")
+                    
                     passed += 1
             except Exception as e:
                 print(f"  [FAIL] Exception: {e}")

@@ -19,6 +19,12 @@ class EntryType(str, Enum):
     INSTANT = "INSTANT"
     CONFIRMATION = "CONFIRMATION"
 
+class NewsQuality(BaseModel):
+    score: int = Field(description="Quality score from 0 (useless) to 10 (highly actionable).")
+    relevance: str = Field(description="Assessment of how relevant the news is to the specific market.")
+    sentiment_clarity: str = Field(description="How clear the sentiment is (High/Medium/Low).")
+    reasoning: str = Field(description="Brief explanation of the score.")
+
 class TradingSignal(BaseModel):
 
     ticker: str = Field(description="The ticker symbol of the asset analyzed.")
@@ -112,6 +118,43 @@ class GeminiAnalyst:
 
         except Exception as e:
             print(f"Error during Gemini analysis: {e}")
+            return None
+
+    def assess_news_quality(self, news_text: str, market_name: str) -> typing.Optional[NewsQuality]:
+        """
+        Asks Gemini to rate the quality and relevance of the fetched news for a specific market.
+        """
+        try:
+            prompt = f"""
+            Analyze the quality of the following news headlines for trading the '{market_name}' market.
+            
+            Criteria for High Score (8-10):
+            - Recent (within last 24h).
+            - Highly relevant to the specific asset/index (not just generic global news).
+            - Contains substantive economic data or strong sentiment drivers.
+            
+            Criteria for Low Score (0-4):
+            - Old/Stale news.
+            - Irrelevant or tangentially related.
+            - "Fluff" or clickbait with no market substance.
+            
+            News Content:
+            {news_text}
+            """
+            
+            response = self.client.models.generate_content(
+                model=self.model_name,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    response_schema=NewsQuality.model_json_schema()
+                )
+            )
+            
+            return NewsQuality(**json.loads(response.text))
+            
+        except Exception as e:
+            print(f"Error during news assessment: {e}")
             return None
 
     def generate_post_mortem(self, trade_data: dict, price_history_df: pd.DataFrame = None) -> str:
