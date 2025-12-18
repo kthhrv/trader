@@ -207,6 +207,65 @@ def run_volatility_check(epic: str):
     except Exception as e:
         logger.error(f"Failed to check volatility: {e}")
 
+def run_list_open_positions():
+    """
+    Fetches and prints all currently open positions from IG.
+    Useful for finding Deal IDs for manual monitoring.
+    """
+    logger.info("Fetching open positions from IG...")
+    try:
+        client = IGClient()
+        client.authenticate()
+        # fetch_open_positions returns a DataFrame or dict
+        positions = client.service.fetch_open_positions()
+        
+        if isinstance(positions, pd.DataFrame):
+            if positions.empty:
+                print("\nNo open positions found.")
+                return
+
+            print(f"\n{'='*90}")
+            print(f"{'OPEN POSITIONS':^90}")
+            print(f"{'='*90}")
+            
+            # Select relevant columns if they exist
+            cols_to_show = ['epic', 'dealId', 'direction', 'size', 'level', 'stopLevel', 'limitLevel', 'profit']
+            available_cols = [c for c in cols_to_show if c in positions.columns]
+            
+            df_view = positions[available_cols].copy()
+            print(df_view.to_string(index=False))
+            print(f"{'='*90}\n")
+            
+        elif isinstance(positions, dict):
+            # Handle dictionary response (raw API response)
+            pos_list = positions.get('positions', [])
+            if not pos_list:
+                print("\nNo open positions found.")
+                return
+
+            print(f"\n{'='*80}")
+            print(f"{'OPEN POSITIONS':^80}")
+            print(f"{'='*80}")
+            
+            for item in pos_list:
+                market = item.get('market', {})
+                pos = item.get('position', {})
+                
+                print(f"Epic:      {market.get('epic')}")
+                print(f"Deal ID:   {pos.get('dealId')}")
+                print(f"Direction: {pos.get('direction')}")
+                print(f"Size:      {pos.get('size')}")
+                print(f"Level:     {pos.get('level')}")
+                print(f"PnL:       {market.get('profitCurrency')} {market.get('netChange')}")
+                print("-" * 40)
+            print(f"{'='*80}\n")
+        else:
+            print(f"Unexpected response format: {type(positions)}")
+            print(positions)
+
+    except Exception as e:
+        logger.error(f"Failed to list positions: {e}")
+
 def run_post_mortem(deal_id: str):
     """
     Runs a post-mortem analysis for a specific deal ID.
@@ -443,6 +502,7 @@ def main():
     parser.add_argument("--with-rating", action="store_true", help="When using --news-check, ask Gemini to rate the relevance/quality of the news (consumes API tokens).")
     parser.add_argument("--post-mortem", type=str, help="Run post-mortem analysis on a specific deal ID.")
     parser.add_argument("--monitor-trade", type=str, help="Start 'Monitor & Manage' process for a specific active Deal ID.")
+    parser.add_argument("--list-open", action="store_true", help="List all currently open positions and their Deal IDs.")
     parser.add_argument("--recent-trades", type=int, nargs="?", const=5, help="Print N recent trades. Defaults to 5 if no number provided.")
     parser.add_argument("--scorecard", action="store_true", help="Generate a comprehensive performance scorecard from the database.")
     parser.add_argument("--volatility-check", action="store_true", help="Check current market volatility (Range/ATR) for the selected market/epic.")
@@ -489,6 +549,10 @@ def main():
 
     if args.monitor_trade:
         run_monitor_trade(args.monitor_trade)
+        return
+
+    if args.list_open:
+        run_list_open_positions()
         return
 
     if args.scorecard:
