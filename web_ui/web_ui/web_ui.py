@@ -370,6 +370,7 @@ class State(rx.State):
             "action": "BUY",
             "entry": 7500,
             "exit_price": 7535,  # Added exit price
+            "initial_stop_loss": 7480,
             "stop_loss": 7480,
             "take_profit": 7540,
             "outcome": "WIN",
@@ -622,6 +623,12 @@ def trade_detail_modal() -> rx.Component:
                     rx.text(State.selected_trade["outcome"], text_align="left"),
                     rx.text("PnL:", font_weight="bold", text_align="right"),
                     rx.text(State.selected_trade["pnl"], text_align="left"),
+                    rx.text("Initial SL:", font_weight="bold", text_align="right"),
+                    rx.text(
+                        State.selected_trade["initial_stop_loss"], text_align="left"
+                    ),
+                    rx.text("Current SL:", font_weight="bold", text_align="right"),
+                    rx.text(State.selected_trade["stop_loss"], text_align="left"),
                     rx.text("Entry:", font_weight="bold", text_align="right"),
                     rx.text(
                         f"{State.selected_trade['entry']} | Exit: {State.selected_trade['exit_price']}",
@@ -770,6 +777,8 @@ def index() -> rx.Component:
                         rx.table.column_header_cell("Ticker"),
                         rx.table.column_header_cell("Action"),
                         rx.table.column_header_cell("Entry"),
+                        rx.table.column_header_cell("Init SL"),
+                        rx.table.column_header_cell("Final SL"),
                         rx.table.column_header_cell("Exit"),
                         rx.table.column_header_cell("PnL"),
                         rx.table.column_header_cell("Outcome"),
@@ -784,6 +793,8 @@ def index() -> rx.Component:
                             rx.table.cell(trade["epic"]),
                             rx.table.cell(trade["action"]),
                             rx.table.cell(trade["entry"]),
+                            rx.table.cell(trade["initial_stop_loss"]),
+                            rx.table.cell(trade["stop_loss"]),
                             rx.table.cell(trade["exit_price"]),
                             rx.table.cell(trade["pnl"]),
                             rx.table.cell(trade["outcome"]),
