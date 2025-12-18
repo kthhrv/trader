@@ -23,8 +23,11 @@ class NewsFetcher:
 
         # 1. Fetch Google News
         try:
-            formatted_url = self.google_base_url.format(query=quote(query))
-            logger.info(f"Fetching Google news for: '{query}'")
+            # Enforce recency (last 48h) to avoid stale "relevance" matches
+            # 'scoring=n' (Newest) can sometimes be too noisy, so we use 'when:2d' with default sort.
+            google_query = f"{query} when:2d"
+            formatted_url = self.google_base_url.format(query=quote(google_query))
+            logger.info(f"Fetching Google news for: '{google_query}'")
             feed = feedparser.parse(formatted_url)
             
             if feed.entries:
