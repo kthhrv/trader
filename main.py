@@ -16,6 +16,7 @@ from src.database import (
     fetch_recent_trades,
     fetch_active_trades,
     sync_active_trade,
+    update_trade_outcome,
 )
 from src.gemini_analyst import (
     GeminiAnalyst,
@@ -595,6 +596,154 @@ def run_monitor_trade(deal_id: str):
         stream_manager.stop()
 
 
+def run_sync_trade(deal_id: str):
+    """
+    Manually syncs a trade's outcome from IG History to the DB.
+    """
+    logger.info(f"Syncing trade {deal_id} from IG API...")
+
+    # 1. Fetch trade from DB to get context
+    trade_data = fetch_trade_data(deal_id)
+    if not trade_data:
+        logger.error(f"Trade {deal_id} not found in database.")
+        return
+
+    log = trade_data["log"]
+    epic = log["epic"]
+    logger.info(f"Looking for closure of {epic} (Deal {deal_id})...")
+
+    try:
+        client = IGClient()
+        client.authenticate()
+
+        # 2. Fetch Transaction History
+        # We fetch a decent history length (e.g. last few days) to find the close
+        # Use max_span_seconds (e.g. 48h = 172800s)
+        history = client.service.fetch_transaction_history(
+            trans_type="ALL_DEAL", max_span_seconds=172800
+        )
+
+        if history is None or history.empty:
+            logger.error("No transaction history returned from IG.")
+            return
+
+        # 3. Find the closing transaction
+        # We look for a transaction that:
+        # - Matches the instrument/epic (approximately)
+        # - Has a non-zero PnL (or is a closure)
+        # - Ideally references the deal_id (but IG history sometimes uses a new deal ID for the close)
+        # - Is AFTER the entry timestamp
+
+        # Filter by Epic (instrumentName might differ, check 'epic' col if available)
+        # 'instrumentName' often contains the name, not the epic.
+        # But 'openDate' might help.
+
+        target_row = None
+
+        # Sort by date descending (newest first)
+        history["date"] = pd.to_datetime(history["date"])
+        history = history.sort_values("date", ascending=False)
+
+        for index, row in history.iterrows():
+            # Check if this transaction relates to our deal
+            # IG History Columns: date, instrumentName, period, direction, size, level, openLevel,
+            # closeLevel, profitAndLoss, transactionType, reference, openDate, dealId
+
+            # The 'reference' column in history often points to the Deal Reference of the CLOSING trade.
+            # The 'dealId' column is the ID of this transaction.
+
+            # We try to match by Epic/Instrument and Timing, or if we are lucky, some ID linkage.
+            # Since strict ID matching is hard with just 'deal_id' (opening), we look for:
+            # - Same Instrument
+            # - Closing Action (Opposite direction of opening? Or just 'profitAndLoss' presence)
+            # - Time > Entry Time
+
+            # Check if profitAndLoss is populated
+            pnl_str = str(row.get("profitAndLoss", ""))
+            if not pnl_str or pnl_str == "nan":
+                continue
+
+            # Check if it looks like the right instrument
+            # (Simple heuristic: matching name or epic if available)
+            # Note: IG REST history doesn't always have 'epic'. It has 'instrumentName'.
+            # We assume the most recent closing transaction for this instrument is likely it if we trade sequentially.
+
+            # Clean PnL
+            try:
+                pnl_val = float(
+                    pnl_str.replace("£", "").replace("A$", "").replace(",", "")
+                )
+            except ValueError:
+                continue
+
+            # If we found a valid PnL row, let's see if it's the one.
+            # For now, let's log potential candidates and pick the first one that matches the epic/instrument loosely.
+            logger.info(
+                f"Candidate: {row['date']} | {row['instrumentName']} | PnL: {pnl_val}"
+            )
+
+            # Confirm Update
+            # In a CLI tool, we might want to ask confirmation, but here we just take the first
+            # plausible match if it's recent?
+            # Or better: check if 'openDate' matches our trade's open date?
+            # row['openDate'] usually format: "YYYY/MM/DD" or similar.
+
+            # Map common Epic codes to Instrument Names found in History
+            epic_to_name_map = {
+                "SPTRD": "US 500",
+                "FTSE": "FTSE 100",
+                "DAX": "Germany 40",
+                "ASX": "Australia 200",
+                "NASDAQ": "US Tech 100",
+                "NIKKEI": "Japan 225",
+            }
+
+            matched = False
+            # Check direct epic match (rare in history)
+            if epic in row.get("epic", ""):
+                matched = True
+
+            # Check using the mapping
+            if not matched:
+                core_code = epic.split(".")[2] if len(epic.split(".")) > 2 else ""
+                expected_name = epic_to_name_map.get(core_code, core_code)
+                if expected_name in row["instrumentName"]:
+                    matched = True
+
+            if matched:
+                target_row = row
+                break
+
+        if target_row is not None:
+            pnl_str = str(target_row.get("profitAndLoss", ""))
+            pnl_val = float(pnl_str.replace("£", "").replace("A$", "").replace(",", ""))
+
+            close_level = target_row.get("closeLevel") or target_row.get("level")
+            close_time = target_row["date"].isoformat()
+            outcome = "WIN" if pnl_val > 0 else "LOSS"
+
+            logger.info(
+                f"Found Match! Updating Trade {deal_id}: PnL={pnl_val}, Exit={close_level}, Time={close_time}"
+            )
+
+            update_trade_outcome(
+                deal_id=deal_id,
+                exit_price=float(close_level),
+                pnl=pnl_val,
+                exit_time=close_time,
+                outcome=outcome,
+            )
+            logger.info("Database updated successfully.")
+
+        else:
+            logger.warning(
+                "No matching closing transaction found in recent history (2 days)."
+            )
+
+    except Exception as e:
+        logger.error(f"Sync failed: {e}")
+
+
 def run_strategy(
     epic: str,
     strategy_name: str,
@@ -806,11 +955,21 @@ def main():
         help="News search terms (used with --now)",
     )
 
+    parser.add_argument(
+        "--sync-trade",
+        type=str,
+        help="Manually sync a trade's outcome (PnL, Exit Price) from IG History to DB. Usage: --sync-trade <deal_id>",
+    )
+
     args = parser.parse_args()
 
     # Register signal handlers
     signal.signal(signal.SIGINT, graceful_shutdown)
     signal.signal(signal.SIGTERM, graceful_shutdown)
+
+    if args.sync_trade:
+        run_sync_trade(args.sync_trade)
+        return
 
     if args.test_trade:
         epic_to_trade = None
