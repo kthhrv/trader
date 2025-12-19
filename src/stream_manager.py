@@ -77,19 +77,35 @@ class StreamManager:
             return
 
         try:
-            # Ensure REST tokens are fresh
+            # Decide which service to use for streaming
+            # Default to the primary service (Trading)
+            target_service = self.ig_client.service
+            endpoint = self.ls_endpoint
+
+            # Check for Hybrid Mode: If data_service is different and initialized
+            if (
+                hasattr(self.ig_client, "data_service")
+                and self.ig_client.data_service != self.ig_client.service
+            ):
+                target_service = self.ig_client.data_service
+                # If we are using the secondary data service, it is by definition the LIVE one in Hybrid Mode
+                endpoint = "https://apd.marketdatasystems.com"
+                logger.info("StreamManager: Using LIVE DATA service for streaming.")
+
+            # Ensure REST tokens are fresh for the target service
+            # (Note: IGClient.authenticate() usually handles both, but let's be safe)
             if not self.ig_client.authenticated:
                 self.ig_client.authenticate()
 
-            # Extract Tokens directly from headers
-            headers = self.ig_client.service.session.headers
+            # Extract Tokens directly from headers of the TARGET service
+            headers = target_service.session.headers
             cst = headers.get("CST")
             xst = headers.get("X-SECURITY-TOKEN")
-            account_id = self.ig_client.service.account_id
+            account_id = target_service.account_id
 
             if not cst or not xst or not account_id:
                 raise ValueError(
-                    "Could not find CST/XST tokens or account ID in IGClient session."
+                    f"Could not find CST/XST tokens or account ID in {'Data' if target_service == self.ig_client.data_service else 'Trading'} Service session."
                 )
 
             script_path = "src/stream_service.js"
@@ -102,7 +118,7 @@ class StreamManager:
                 xst,
                 account_id,
                 "PLACEHOLDER_EPIC",
-                self.ls_endpoint,
+                endpoint,
             ]  # Epic is a placeholder, will be updated via subscribe_to_epic
 
             logger.info(f"Spawning Node.js stream service: {' '.join(cmd)}")
@@ -166,20 +182,35 @@ class StreamManager:
         """
         self.callbacks[epic] = callback
 
+        # Decide which service to use for streaming
+        target_service = self.ig_client.service
+        endpoint = self.ls_endpoint
+
+        if (
+            hasattr(self.ig_client, "data_service")
+            and self.ig_client.data_service != self.ig_client.service
+        ):
+            target_service = self.ig_client.data_service
+            # If we are using the secondary data service, it is by definition the LIVE one in Hybrid Mode
+            endpoint = "https://apd.marketdatasystems.com"
+            logger.info(
+                "StreamManager: Using LIVE DATA service for streaming subscription."
+            )
+
         # Re-authenticate to get fresh tokens if needed
         if not self.ig_client.authenticated:
             self.ig_client.authenticate()
 
-        headers = self.ig_client.service.session.headers
+        headers = target_service.session.headers
         cst = headers.get("CST")
         xst = headers.get("X-SECURITY-TOKEN")
-        account_id = self.ig_client.service.account_id
+        account_id = target_service.account_id
 
         if not cst or not xst or not account_id:
             raise ValueError("Could not find CST/XST tokens or account ID.")
 
         script_path = "src/stream_service.js"
-        cmd = ["node", script_path, cst, xst, account_id, epic, self.ls_endpoint]
+        cmd = ["node", script_path, cst, xst, account_id, epic, endpoint]
 
         logger.info(f"Spawning Node.js stream service for {epic}: {' '.join(cmd)}")
         self.process = subprocess.Popen(

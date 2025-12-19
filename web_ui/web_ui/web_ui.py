@@ -109,8 +109,8 @@ class State(rx.State):
         self.us_status = ms.get_market_status("IX.D.SPTRD.DAILY.IP")
         self.jp_status = ms.get_market_status("IX.D.NIKKEI.DAILY.IP")
         self.de_status = ms.get_market_status("IX.D.DAX.DAILY.IP")
-        self.au_status = ms.get_market_status("IX.D.ASX.DAILY.IP")
-        self.ndx_status = ms.get_market_status("IX.D.NASDAQ.DAILY.IP")
+        self.au_status = ms.get_market_status("IX.D.ASX.MONTH1.IP")
+        self.ndx_status = ms.get_market_status("IX.D.NASDAQ.CASH.IP")
 
         self.last_updated = datetime.now().strftime("%H:%M:%S")
 

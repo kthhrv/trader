@@ -20,3 +20,6 @@ trading_plan.json
 # db
 data
 .env.live
+
+# VIM
+*.swp

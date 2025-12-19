@@ -41,16 +41,7 @@ def sample_trades():
             "entry_type": "INSTANT",
         },
         # Rejected
-        {
-            "id": 4,
-            "timestamp": "2025-05-20 11:00:00",
-            "epic": "IX.D.NASDAQ.DAILY.IP",
-            "outcome": "REJECTED_SAFETY",
-            "pnl": None,
-            "deal_id": None,
-            "confidence": "HIGH",
-            "entry_type": "CONFIRMATION",
-        },
+        {"epic": "IX.D.NASDAQ.CASH.IP", "pnl": -50.0, "outcome": "REJECTED_SAFETY"},
         # Timeout (No Deal)
         {
             "id": 5,

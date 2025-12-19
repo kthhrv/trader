@@ -96,7 +96,7 @@ MARKET_CONFIGS = {
         "max_spread": 2.5,
     },
     "australia": {
-        "epic": "IX.D.ASX.DAILY.IP",
+        "epic": "IX.D.ASX.MONTH1.IP",
         "strategy_name": "ASX OPEN",
         "news_query": "ASX 200 Australia Economy",
         "schedule": {
@@ -109,7 +109,7 @@ MARKET_CONFIGS = {
         "max_spread": 3.0,
     },
     "us_tech": {
-        "epic": "IX.D.NASDAQ.DAILY.IP",
+        "epic": "IX.D.NASDAQ.CASH.IP",
         "strategy_name": "NASDAQ OPEN",
         "news_query": "Nasdaq 100 US Tech Sector",
         "schedule": {

@@ -75,7 +75,7 @@ class TestMarketStatus(unittest.TestCase):
         self.mock_datetime.now.return_value = mock_now
         self.mock_au_holidays_cls.return_value.__contains__.return_value = True
 
-        self.assertTrue(self.market_status.is_holiday("IX.D.ASX.DAILY.IP"))
+        self.assertTrue(self.market_status.is_holiday("IX.D.ASX.MONTH1.IP"))
         self.mock_au_holidays_cls.return_value.__contains__.assert_called_with(
             date(2025, 1, 26)
         )
@@ -96,7 +96,7 @@ class TestMarketStatus(unittest.TestCase):
         self.mock_datetime.now.side_effect = lambda tz: mock_now_utc.astimezone(tz)
 
         self.mock_au_holidays_cls.return_value.__contains__.return_value = True
-        self.assertTrue(self.market_status.is_holiday("IX.D.ASX.DAILY.IP"))
+        self.assertTrue(self.market_status.is_holiday("IX.D.ASX.MONTH1.IP"))
 
         self.mock_au_holidays_cls.return_value.__contains__.assert_called_with(
             date(2025, 1, 21)
