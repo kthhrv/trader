@@ -99,9 +99,10 @@ class StrategyEngine:
                 return
 
             # 2. Calculate Technical Indicators
-            # Ensure columns are numeric
+            # Ensure columns are numeric (handle missing volume gracefully)
             cols = ["open", "high", "low", "close", "volume"]
-            df[cols] = df[cols].apply(pd.to_numeric, errors="coerce")
+            existing_cols = [c for c in cols if c in df.columns]
+            df[existing_cols] = df[existing_cols].apply(pd.to_numeric, errors="coerce")
 
             # Calculate Indicators
             # ATR(14) - Volatility

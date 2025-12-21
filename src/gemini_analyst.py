@@ -231,6 +231,16 @@ class GeminiAnalyst:
                 period_open = price_history_df["open"].iloc[0]
                 period_close = price_history_df["close"].iloc[-1]
 
+                # Candle Data (Last 20 5-min bars)
+                agg_dict = {
+                    "open": "first",
+                    "high": "max",
+                    "low": "min",
+                    "close": "last",
+                }
+                if "volume" in price_history_df.columns:
+                    agg_dict["volume"] = "sum"
+
                 price_history_context = f"""
         **Broader Market Context (1H before to Present):**
         - Period High: {period_high}
@@ -238,7 +248,7 @@ class GeminiAnalyst:
         - Open: {period_open}
         - Close: {period_close}
         - Candle Data (Last 20 5-min bars):
-        {price_history_df.resample("5Min").agg({"open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"}).tail(20).to_string()}
+        {price_history_df.resample("5Min").agg(agg_dict).tail(20).to_string()}
         """
             except Exception as e:
                 price_history_context = f"Could not process price history: {e}"
