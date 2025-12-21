@@ -109,7 +109,7 @@ class GeminiAnalyst:
         Sends market data to Gemini and returns a structured TradingSignal.
         """
         try:
-            prompt = f"It's 20 minutes before Market Open, Develop a trading strategy for the {strategy_name} based on the following market data, and provide a trading signal:\n\n{market_data_context}"
+            prompt = f"It's 5 minutes before Market Open, Develop a trading strategy for the {strategy_name} based on the following market data, and provide a trading signal:\n\n{market_data_context}"
 
             response = self.client.models.generate_content(
                 model=self.model_name,
