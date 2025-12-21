@@ -100,7 +100,7 @@ class StrategyEngine:
 
             # 2. Calculate Technical Indicators
             # Ensure columns are numeric
-            cols = ["open", "high", "low", "close"]
+            cols = ["open", "high", "low", "close", "volume"]
             df[cols] = df[cols].apply(pd.to_numeric, errors="coerce")
 
             # Calculate Indicators

@@ -91,6 +91,7 @@ def test_generate_plan_success(mock_components):
         "high": [105.0] * 50,
         "low": [95.0] * 50,
         "close": [102.0] * 50,
+        "volume": [1000] * 50,
     }
     mock_df = pd.DataFrame(data)
     mock_client.fetch_historical_data.return_value = mock_df
@@ -136,6 +137,7 @@ def test_generate_plan_wait(mock_components, caplog):
         "high": [105.0] * 50,
         "low": [95.0] * 50,
         "close": [102.0] * 50,
+        "volume": [1000] * 50,
     }
     mock_df = pd.DataFrame(data)
     mock_client.fetch_historical_data.return_value = mock_df

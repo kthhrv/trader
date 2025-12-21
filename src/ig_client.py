@@ -216,12 +216,25 @@ class IGClient:
 
     def _process_historical_df(self, df: pd.DataFrame) -> pd.DataFrame:
         if isinstance(df.columns, pd.MultiIndex):
+            # Extract volume if it exists at the top level
+            volume_col = None
+            if "Volume" in df.columns.get_level_values(0):
+                volume_col = df["Volume"]
+
             if "bid" in df.columns.get_level_values(0):
                 df = df["bid"]
             elif "last" in df.columns.get_level_values(0):
                 df = df["last"]
             elif "ask" in df.columns.get_level_values(0):
                 df = df["ask"]
+
+            # Re-attach volume if we extracted it
+            if volume_col is not None:
+                # If volume_col is a DataFrame (e.g. from multi-index), take its first column
+                if isinstance(volume_col, pd.DataFrame):
+                    df["volume"] = volume_col.iloc[:, 0]
+                else:
+                    df["volume"] = volume_col
 
         df.rename(
             columns={

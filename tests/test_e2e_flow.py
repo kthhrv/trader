@@ -105,6 +105,7 @@ def test_e2e_trading_flow(e2e_mocks, caplog):
             "low": [entry_price - 15] * 25,
             "close": [entry_price - 8] * 24
             + [entry_price + 3],  # Make the last close different
+            "volume": [1000] * 25,
         }
     )
     mock_historical_df["ATR"] = [10.0] * 25

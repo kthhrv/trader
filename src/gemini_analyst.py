@@ -217,6 +217,14 @@ class GeminiAnalyst:
                 if not isinstance(price_history_df.index, pd.DatetimeIndex):
                     price_history_df.index = pd.to_datetime(price_history_df.index)
 
+                # Ensure columns are numeric
+                cols = ["open", "high", "low", "close", "volume"]
+                for col in cols:
+                    if col in price_history_df.columns:
+                        price_history_df[col] = pd.to_numeric(
+                            price_history_df[col], errors="coerce"
+                        )
+
                 # Simple summary statistics
                 period_high = price_history_df["high"].max()
                 period_low = price_history_df["low"].min()
@@ -230,7 +238,7 @@ class GeminiAnalyst:
         - Open: {period_open}
         - Close: {period_close}
         - Candle Data (Last 20 5-min bars):
-        {price_history_df.resample("5Min").agg({"open": "first", "high": "max", "low": "min", "close": "last"}).tail(20).to_string()}
+        {price_history_df.resample("5Min").agg({"open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"}).tail(20).to_string()}
         """
             except Exception as e:
                 price_history_context = f"Could not process price history: {e}"

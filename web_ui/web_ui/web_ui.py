@@ -140,6 +140,13 @@ class State(rx.State):
             else:
                 exit_dt = datetime.now()
 
+            # Safety check: If Exit is before Entry (corrupted data), default to Now
+            if exit_dt <= entry_dt:
+                print(
+                    f"WARN: Exit time {exit_dt} <= Entry time {entry_dt}. Defaulting exit to Now."
+                )
+                exit_dt = datetime.now()
+
             # Define Window: Entry - 3h to Exit + 30m to ensure enough data for indicators (20 SMA etc)
             start_dt = entry_dt - timedelta(hours=3)
             end_dt = exit_dt + timedelta(minutes=30)

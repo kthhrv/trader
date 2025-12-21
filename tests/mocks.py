@@ -65,6 +65,7 @@ class MockIGClient:
             "high": [105.0 + i for i in range(num_points)],
             "low": [95.0 + i for i in range(num_points)],
             "close": [102.0 + i for i in range(num_points)],
+            "volume": [1000 for _ in range(num_points)],
         }
         df = pd.DataFrame(data)
         df.index = pd.to_datetime(

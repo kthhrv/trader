@@ -641,8 +641,10 @@ def run_sync_trade(deal_id: str):
         target_row = None
 
         # Sort by date descending (newest first)
-        history["date"] = pd.to_datetime(history["date"])
-        history = history.sort_values("date", ascending=False)
+        # Use dateUtc if available for precision, else date
+        date_col = "dateUtc" if "dateUtc" in history.columns else "date"
+        history[date_col] = pd.to_datetime(history[date_col])
+        history = history.sort_values(date_col, ascending=False)
 
         for index, row in history.iterrows():
             # Check if this transaction relates to our deal
@@ -719,7 +721,7 @@ def run_sync_trade(deal_id: str):
             pnl_val = float(pnl_str.replace("£", "").replace("A$", "").replace(",", ""))
 
             close_level = target_row.get("closeLevel") or target_row.get("level")
-            close_time = target_row["date"].isoformat()
+            close_time = target_row[date_col].isoformat()
             outcome = "WIN" if pnl_val > 0 else "LOSS"
 
             logger.info(

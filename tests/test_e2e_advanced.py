@@ -166,6 +166,7 @@ def test_e2e_confirmation_entry(advanced_mocks, caplog):
                 "high": [entry_price + 10, entry_price + 10],
                 "low": [entry_price - 2, entry_price - 2],
                 "close": [entry_price + 5, entry_price + 5],  # Close > Entry
+                "volume": [1000, 1000],
             }
         )
         mock_ig_client.fetch_historical_data.return_value = closed_candle_df
