@@ -83,4 +83,3 @@
 ### Outstanding Issues
 - **Liveness Monitoring**: we should have a 3rd party ping the system and alert me if non-reachable, non-healthy
 - **Error Alerting**: system should notify me of errors, not just crashes but Errors in the logs
-- **Web UI**: should be functional, particulary graphs of previous trades for analysis
