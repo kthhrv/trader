@@ -26,6 +26,7 @@ class StrategyEngine:
         dry_run: bool = False,
         verbose: bool = False,
         max_spread: float = 2.0,
+        ignore_holidays: bool = False,
         ig_client: Optional[IGClient] = None,
         analyst: Optional[GeminiAnalyst] = None,
         news_fetcher: Optional[NewsFetcher] = None,
@@ -44,6 +45,7 @@ class StrategyEngine:
         self.dry_run = dry_run
         self.verbose = verbose
         self.max_spread = max_spread
+        self.ignore_holidays = ignore_holidays
 
         self.client = ig_client if ig_client else IGClient()
         self.analyst = analyst if analyst else GeminiAnalyst()
@@ -75,7 +77,7 @@ class StrategyEngine:
         Step 1: Fetches data, asks Gemini, and stores the trading plan.
         """
         # Check for holidays
-        if self.market_status.is_holiday(self.epic):
+        if not self.ignore_holidays and self.market_status.is_holiday(self.epic):
             logger.warning(
                 f"Holiday detected for {self.epic}. Strategy execution aborted."
             )

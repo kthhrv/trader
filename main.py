@@ -754,12 +754,13 @@ def run_strategy(
     verbose: bool = False,
     timeout_seconds: int = 5400,
     max_spread: float = 2.0,
+    ignore_holidays: bool = False,
 ):
     """
     Generic driver for a trading strategy on a specific epic.
     """
     logger.info(
-        f"--- STARTING {strategy_name} STRATEGY for {epic} (Dry Run: {dry_run}, Timeout: {timeout_seconds}s, Max Spread: {max_spread}) ---"
+        f"--- STARTING {strategy_name} STRATEGY for {epic} (Dry Run: {dry_run}, Timeout: {timeout_seconds}s, Max Spread: {max_spread}, Ignore Holidays: {ignore_holidays}) ---"
     )
 
     engine = StrategyEngine(
@@ -769,6 +770,7 @@ def run_strategy(
         dry_run=dry_run,
         verbose=verbose,
         max_spread=max_spread,
+        ignore_holidays=ignore_holidays,
     )
 
     # 1. Generate Plan
@@ -783,7 +785,7 @@ def run_strategy(
     logger.info(f"--- {strategy_name} STRATEGY COMPLETED ---")
 
 
-def run_london_strategy(dry_run: bool = False):
+def run_london_strategy(dry_run: bool = False, ignore_holidays: bool = False):
     config = MARKET_CONFIGS["london"]
     run_strategy(
         config["epic"],
@@ -792,10 +794,11 @@ def run_london_strategy(dry_run: bool = False):
         dry_run=dry_run,
         timeout_seconds=config["timeout_seconds"],
         max_spread=config["max_spread"],
+        ignore_holidays=ignore_holidays,
     )
 
 
-def run_ny_strategy(dry_run: bool = False):
+def run_ny_strategy(dry_run: bool = False, ignore_holidays: bool = False):
     config = MARKET_CONFIGS["ny"]
     run_strategy(
         config["epic"],
@@ -804,10 +807,11 @@ def run_ny_strategy(dry_run: bool = False):
         dry_run=dry_run,
         timeout_seconds=config["timeout_seconds"],
         max_spread=config["max_spread"],
+        ignore_holidays=ignore_holidays,
     )
 
 
-def run_nikkei_strategy(dry_run: bool = False):
+def run_nikkei_strategy(dry_run: bool = False, ignore_holidays: bool = False):
     config = MARKET_CONFIGS["nikkei"]
     run_strategy(
         config["epic"],
@@ -816,10 +820,11 @@ def run_nikkei_strategy(dry_run: bool = False):
         dry_run=dry_run,
         timeout_seconds=config["timeout_seconds"],
         max_spread=config["max_spread"],
+        ignore_holidays=ignore_holidays,
     )
 
 
-def run_germany_strategy(dry_run: bool = False):
+def run_germany_strategy(dry_run: bool = False, ignore_holidays: bool = False):
     config = MARKET_CONFIGS["germany"]
     run_strategy(
         config["epic"],
@@ -828,10 +833,11 @@ def run_germany_strategy(dry_run: bool = False):
         dry_run=dry_run,
         timeout_seconds=config["timeout_seconds"],
         max_spread=config["max_spread"],
+        ignore_holidays=ignore_holidays,
     )
 
 
-def run_australia_strategy(dry_run: bool = False):
+def run_australia_strategy(dry_run: bool = False, ignore_holidays: bool = False):
     config = MARKET_CONFIGS["australia"]
     run_strategy(
         config["epic"],
@@ -840,10 +846,11 @@ def run_australia_strategy(dry_run: bool = False):
         dry_run=dry_run,
         timeout_seconds=config["timeout_seconds"],
         max_spread=config["max_spread"],
+        ignore_holidays=ignore_holidays,
     )
 
 
-def run_us_tech_strategy(dry_run: bool = False):
+def run_us_tech_strategy(dry_run: bool = False, ignore_holidays: bool = False):
     config = MARKET_CONFIGS["us_tech"]
     run_strategy(
         config["epic"],
@@ -852,6 +859,7 @@ def run_us_tech_strategy(dry_run: bool = False):
         dry_run=dry_run,
         timeout_seconds=config["timeout_seconds"],
         max_spread=config["max_spread"],
+        ignore_holidays=ignore_holidays,
     )
 
 
@@ -869,6 +877,11 @@ def main():
         "--dry-run",
         action="store_true",
         help="Execute strategy without placing actual orders (used with --now)",
+    )
+    parser.add_argument(
+        "--holiday-season-override",
+        action="store_true",
+        help="Force execution even during holiday season (Dec 20 - Jan 4) or public holidays.",
     )
     parser.add_argument(
         "--news-only",
@@ -1108,6 +1121,7 @@ def main():
                 verbose=args.verbose,
                 timeout_seconds=market_config["timeout_seconds"],
                 max_spread=market_config["max_spread"],
+                ignore_holidays=args.holiday_season_override,
             )
         elif args.epic:
             # Default timeout for custom epic if not specified
@@ -1119,6 +1133,7 @@ def main():
                 verbose=args.verbose,
                 timeout_seconds=5400,
                 max_spread=2.0,
+                ignore_holidays=args.holiday_season_override,
             )
         else:
             logger.error(
@@ -1135,7 +1150,10 @@ def main():
         scheduler.add_job(
             globals()[f"run_{market_key}_strategy"],
             "cron",
-            kwargs={"dry_run": args.dry_run},  # Pass dry_run as a keyword argument
+            kwargs={
+                "dry_run": args.dry_run,
+                "ignore_holidays": args.holiday_season_override,
+            },  # Pass flags as keyword arguments
             **config["schedule"],
         )
 
