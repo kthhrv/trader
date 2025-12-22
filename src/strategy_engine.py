@@ -699,6 +699,8 @@ class StrategyEngine:
                 )
                 take_profit_level = None
 
+            execution_price = plan.entry  # Default to planned entry
+
             if dry_run:
                 logger.info(
                     f"DRY RUN: Order would have been PLACED for {direction} {size} {self.epic} at entry {plan.entry} (Stop: {plan.stop_loss}, TP: {take_profit_level}). Spread: {current_spread}."
@@ -720,6 +722,17 @@ class StrategyEngine:
 
                 if confirmation and "dealId" in confirmation:
                     deal_id = confirmation["dealId"]
+                    # Capture actual fill price
+                    if "level" in confirmation and confirmation["level"]:
+                        try:
+                            execution_price = float(confirmation["level"])
+                            logger.info(
+                                f"Order filled at actual level: {execution_price} (Planned: {plan.entry})"
+                            )
+                        except ValueError:
+                            logger.warning(
+                                f"Could not parse fill level from confirmation: {confirmation['level']}"
+                            )
                 else:
                     logger.warning("Could not extract dealId from confirmation.")
 
@@ -732,6 +745,7 @@ class StrategyEngine:
                     outcome=outcome,
                     deal_id=deal_id,
                     size=size,
+                    entry=execution_price,
                 )
             else:
                 # Fallback: Log fresh if no pending ID (e.g. Test Trade)
@@ -751,7 +765,7 @@ class StrategyEngine:
                 self.trade_monitor.monitor_trade(
                     deal_id,
                     self.epic,
-                    entry_price=plan.entry,
+                    entry_price=execution_price,
                     stop_loss=plan.stop_loss,
                     atr=plan.atr,
                     use_trailing_stop=plan.use_trailing_stop,
