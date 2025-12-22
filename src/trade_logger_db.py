@@ -73,7 +73,9 @@ class TradeLoggerDB:
             logger.error(f"Failed to log trade to DB for {epic}: {e}")
             return None
 
-    def update_trade_status(self, row_id: int, outcome: str, deal_id: str = None):
+    def update_trade_status(
+        self, row_id: int, outcome: str, deal_id: str = None, size: float = None
+    ):
         """
         Updates the status/outcome of an existing trade log entry.
         Used to transition a trade from 'PENDING' to 'LIVE_PLACED' or 'TIMED_OUT'.
@@ -82,29 +84,26 @@ class TradeLoggerDB:
             conn = get_db_connection(self.db_path)
             cursor = conn.cursor()
 
+            updates = ["outcome = ?"]
+            params = [outcome]
+
             if deal_id:
-                cursor.execute(
-                    """
-                    UPDATE trade_log 
-                    SET outcome = ?, deal_id = ?
-                    WHERE id = ?
-                """,
-                    (outcome, deal_id, row_id),
-                )
-            else:
-                cursor.execute(
-                    """
-                    UPDATE trade_log 
-                    SET outcome = ?
-                    WHERE id = ?
-                """,
-                    (outcome, row_id),
-                )
+                updates.append("deal_id = ?")
+                params.append(deal_id)
+
+            if size is not None:
+                updates.append("size = ?")
+                params.append(size)
+
+            params.append(row_id)
+            query = f"UPDATE trade_log SET {', '.join(updates)} WHERE id = ?"
+
+            cursor.execute(query, params)
 
             conn.commit()
             conn.close()
             logger.info(
-                f"Updated trade outcome for Row ID {row_id} to: {outcome} (Deal ID: {deal_id})"
+                f"Updated trade outcome for Row ID {row_id} to: {outcome} (Deal ID: {deal_id}, Size: {size})"
             )
 
         except Exception as e:

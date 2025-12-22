@@ -211,7 +211,14 @@ def test_e2e_trading_flow(e2e_mocks, caplog):
     # 6. Simulate Trade Closure via Stream Update
     # Mock IG Client fetch_transaction_history_by_deal_id for PnL
     mock_history_df = pd.DataFrame(
-        [{"dealReference": "REF", "profitAndLoss": "£50.00", "closeLevel": 7600.0}]
+        [
+            {
+                "dealReference": "REF",
+                "profitAndLoss": "£50.00",
+                "openLevel": 7500.0,
+                "closeLevel": 7600.0,
+            }
+        ]
     )
     mock_ig_client.fetch_transaction_history_by_deal_id.return_value = mock_history_df
 

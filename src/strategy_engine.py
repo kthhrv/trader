@@ -728,7 +728,10 @@ class StrategyEngine:
             if self.active_plan_id:
                 # Update existing PENDING record
                 self.trade_logger.update_trade_status(
-                    row_id=self.active_plan_id, outcome=outcome, deal_id=deal_id
+                    row_id=self.active_plan_id,
+                    outcome=outcome,
+                    deal_id=deal_id,
+                    size=size,
                 )
             else:
                 # Fallback: Log fresh if no pending ID (e.g. Test Trade)

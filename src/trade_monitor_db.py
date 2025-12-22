@@ -342,6 +342,20 @@ class TradeMonitorDB:
                         )
 
                         if final_pnl != 0.0:
+                            # --- DATA SANITY CHECK ---
+                            # Check if the opening price in history matches our entry price
+                            # This prevents the bot from 'stealing' results from manual trades
+                            # if history is polled too generically.
+                            history_open = float(latest_tx.get("openLevel", 0.0))
+                            if entry_price and abs(history_open - entry_price) > 5.0:
+                                logger.warning(
+                                    f"SANITY CHECK FAILED: History Open Level ({history_open}) "
+                                    f"is too far from Bot Entry Price ({entry_price}). "
+                                    f"This transaction might not belong to deal {deal_id}. Skipping update."
+                                )
+                                # Continue to next retry attempt or exit if last attempt
+                                continue
+                            # --- END SANITY CHECK ---
                             break
                 except Exception as e:
                     logger.warning(

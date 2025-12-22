@@ -59,6 +59,9 @@ class MockIGClient:
             return_value={"dealReference": "MOCK_UPDATE_REF"}
         )
 
+    def close_open_position(self, deal_id, direction, size, epic=None, expiry=None):
+        return {"dealReference": "MOCK_CLOSE_REF", "status": "ACCEPTED"}
+
     def _create_mock_historical_data(self, num_points=50):
         data = {
             "open": [100.0 + i for i in range(num_points)],
@@ -171,6 +174,9 @@ class MockStreamManager:
 class MockMarketStatus:
     def __init__(self):
         self.is_holiday = MagicMock(return_value=False)
+        # Return a date far in the future to avoid "near close" triggers
+        future_dt = datetime.now().replace(year=2099)
+        self.get_market_close_datetime = MagicMock(return_value=future_dt)
 
 
 # Mock for TradeLoggerDB

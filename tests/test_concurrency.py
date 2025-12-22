@@ -45,6 +45,7 @@ def create_engine(epic, strategy_name, db_path, deal_id):
         stream_manager=mock_stream_manager,
         db_path=db_path,
         polling_interval=0.1,
+        market_status=mock_market_status,
     )
 
     # Setup typical plan
@@ -86,6 +87,7 @@ def create_engine(epic, strategy_name, db_path, deal_id):
         [
             {
                 "profitAndLoss": "£50.0",
+                "openLevel": 100.0,
                 "closeLevel": 110.0,
                 "date": datetime.now().isoformat(),
             }

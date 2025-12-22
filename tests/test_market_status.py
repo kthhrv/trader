@@ -41,16 +41,16 @@ class TestMarketStatus(unittest.TestCase):
         self.patcher_datetime.stop()
 
     def test_is_holiday_uk(self):
+        # Dec 25 is in Holiday Season
         mock_now = datetime(2025, 12, 25, 10, 0, tzinfo=pytz.UTC)
         self.mock_datetime.now.return_value = mock_now
-        self.mock_uk_holidays_cls.return_value.__contains__.return_value = True
 
         self.assertTrue(self.market_status.is_holiday("IX.D.FTSE.DAILY.IP"))
-        self.mock_uk_holidays_cls.return_value.__contains__.assert_called_with(
-            date(2025, 12, 25)
-        )
+        # Should return True early due to holiday season, so mock_uk_holidays is NOT called
+        self.mock_uk_holidays_cls.return_value.__contains__.assert_not_called()
 
     def test_is_holiday_us(self):
+        # July 4 is NOT in Holiday Season
         mock_now = datetime(2025, 7, 4, 15, 0, tzinfo=pytz.UTC)
         self.mock_datetime.now.return_value = mock_now
         self.mock_nyse_holidays_cls.return_value.__contains__.return_value = True
@@ -61,14 +61,22 @@ class TestMarketStatus(unittest.TestCase):
         )
 
     def test_is_holiday_japan(self):
+        # Jan 1 is in Holiday Season
         mock_now = datetime(2025, 1, 1, 10, 0, tzinfo=pytz.UTC)
         self.mock_datetime.now.return_value = mock_now
-        self.mock_japan_holidays_cls.return_value.__contains__.return_value = True
 
         self.assertTrue(self.market_status.is_holiday("IX.D.NIKKEI.DAILY.IP"))
-        self.mock_japan_holidays_cls.return_value.__contains__.assert_called_with(
-            date(2025, 1, 1)
-        )
+        self.mock_japan_holidays_cls.return_value.__contains__.assert_not_called()
+
+    def test_holiday_season_range(self):
+        # Dec 19 -> False
+        self.assertFalse(self.market_status._is_holiday_season(date(2025, 12, 19)))
+        # Dec 20 -> True
+        self.assertTrue(self.market_status._is_holiday_season(date(2025, 12, 20)))
+        # Jan 4 -> True
+        self.assertTrue(self.market_status._is_holiday_season(date(2025, 1, 4)))
+        # Jan 5 -> False
+        self.assertFalse(self.market_status._is_holiday_season(date(2025, 1, 5)))
 
     def test_is_holiday_australia(self):
         mock_now = datetime(2025, 1, 26, 10, 0, tzinfo=pytz.UTC)

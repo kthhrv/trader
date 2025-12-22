@@ -81,6 +81,12 @@ class MarketStatus:
         is_hol = False
         holiday_name = None
 
+        if self._is_holiday_season(target_date):
+            logger.info(
+                f"Market {country_code} is closed for Holiday Season (Dec 20 - Jan 4). Trading skipped."
+            )
+            return True
+
         if country_code == "UK":
             if target_date in self.uk_holidays:
                 is_hol = True
@@ -110,6 +116,17 @@ class MarketStatus:
         else:
             # logger.info(f"Market {country_code} is OPEN on {target_date}.")
             return False
+
+    def _is_holiday_season(self, d: date) -> bool:
+        """
+        Checks if the date falls within the Christmas/New Year low liquidity period.
+        Blocking: Dec 20 to Jan 4 (inclusive).
+        """
+        if d.month == 12 and d.day >= 20:
+            return True
+        if d.month == 1 and d.day <= 4:
+            return True
+        return False
 
     def get_market_status(self, epic: str) -> str:
         """
