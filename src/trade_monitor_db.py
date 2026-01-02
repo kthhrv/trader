@@ -310,9 +310,9 @@ class TradeMonitorDB:
             final_exit_price = 0.0
 
             # Attempt to fetch final details from history with retries.
-            for attempt in range(3):
+            for attempt in range(10):
                 # Give the IG backend a moment to index the transaction
-                time.sleep(2)
+                time.sleep(5)
 
                 try:
                     history_df = self.client.fetch_transaction_history_by_deal_id(

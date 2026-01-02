@@ -481,6 +481,9 @@ class StrategyEngine:
                     # Logic 2: CONFIRMATION (Candle Close)
                     current_dt = datetime.now()
                     if current_dt.minute != last_checked_minute:
+                        # Update immediately to prevent infinite retry loops if API fails
+                        last_checked_minute = current_dt.minute
+
                         # Only check once per minute to avoid API spam, slightly after the minute mark ideally
                         # Fetch last 1-minute candle
                         try:
@@ -522,7 +525,6 @@ class StrategyEngine:
                                             f"Checked CONFIRMATION ({current_dt.strftime('%H:%M')}): Close {close_price} did not trigger {plan.action} (Target: {plan.entry})"
                                         )
 
-                                    last_checked_minute = current_dt.minute
                         except Exception as e:
                             logger.error(
                                 f"Error fetching 1m data for confirmation: {e}"
