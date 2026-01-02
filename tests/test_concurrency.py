@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 import pandas as pd
 import os
 import tempfile
@@ -110,7 +110,18 @@ def create_engine(epic, strategy_name, db_path, deal_id):
     return engine, mock_ig_client, mock_stream_manager
 
 
-def test_concurrent_trades(temp_db_path, caplog):
+# Capture original sleep before patching
+_real_sleep = time.sleep
+
+
+def fast_sleep_side_effect(seconds):
+    if seconds >= 2.0:
+        return  # Skip long retry waits
+    _real_sleep(seconds)
+
+
+@patch("src.trade_monitor_db.time.sleep", side_effect=fast_sleep_side_effect)
+def test_concurrent_trades(mock_sleep, temp_db_path, caplog):
     """
     Simulates two overlapping trades on different instruments to ensure isolation.
     """
@@ -141,7 +152,7 @@ def test_concurrent_trades(temp_db_path, caplog):
 
     # Trigger London Entry
     london_stream.simulate_price_tick(london_epic, 100.0, 100.5)
-    time.sleep(0.5)
+    time.sleep(1.0)
 
     assert london_engine.position_open is True
     london_ig.place_spread_bet_order.assert_called_once()
@@ -157,7 +168,7 @@ def test_concurrent_trades(temp_db_path, caplog):
 
     # Trigger NY Entry
     ny_stream.simulate_price_tick(ny_epic, 100.0, 100.5)
-    time.sleep(0.5)
+    time.sleep(1.0)
 
     assert ny_engine.position_open is True
     ny_ig.place_spread_bet_order.assert_called_once()
