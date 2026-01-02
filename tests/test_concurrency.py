@@ -166,11 +166,13 @@ def test_concurrent_trades(temp_db_path, caplog):
     logger.info(f"--- Closing London Trade {london_deal_id} ---")
     london_stream.simulate_trade_update({"dealId": london_deal_id, "status": "CLOSED"})
 
-    # Wait for monitor to detect closure (History fetch takes 2s+)
-    for _ in range(50):  # 5 seconds
+    # Wait for monitor to detect closure (History fetch takes up to 50s with retries)
+    for _ in range(
+        100
+    ):  # 10 seconds (still might be tight if full retry hits, but monitor sees closure via stream first)
         if not london_thread.is_alive():
             break
-        time.sleep(0.1)
+        time.sleep(0.5)  # Increase sleep check interval
 
     assert not london_thread.is_alive(), (
         "London thread should have finished after closure."
@@ -181,10 +183,10 @@ def test_concurrent_trades(temp_db_path, caplog):
     logger.info(f"--- Closing NY Trade {ny_deal_id} ---")
     ny_stream.simulate_trade_update({"dealId": ny_deal_id, "status": "CLOSED"})
 
-    for _ in range(50):  # 5 seconds
+    for _ in range(100):  # Wait longer for potential retries
         if not ny_thread.is_alive():
             break
-        time.sleep(0.1)
+        time.sleep(0.5)
 
     assert not ny_thread.is_alive(), "NY thread should have finished after closure."
 

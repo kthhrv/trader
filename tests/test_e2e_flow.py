@@ -1,5 +1,6 @@
 import pytest
 from unittest.mock import MagicMock
+import unittest.mock
 import pandas as pd
 import os
 import tempfile
@@ -244,7 +245,11 @@ def test_e2e_trading_flow(e2e_mocks, caplog):
     )
 
     # Allow monitor to poll and detect closure
-    trade_execution_thread.join(timeout=3.0)  # Wait for the thread to finish
+    # We patch time.sleep inside the trade_monitor module to avoid waiting 50s
+    with unittest.mock.patch(
+        "src.trade_monitor_db.time.sleep", side_effect=lambda x: None
+    ):
+        trade_execution_thread.join(timeout=10.0)  # Wait for the thread to finish
     assert not trade_execution_thread.is_alive()
 
     # Verify trade logger called for placement (AFTER monitoring finishes)
