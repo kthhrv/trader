@@ -163,13 +163,16 @@ def test_generate_plan_wait(mock_components, caplog):
     with caplog.at_level(logging.INFO):
         engine.generate_plan()
 
-    # Verify that no active plan is set
-    assert engine.active_plan is None
+    # Verify that the active plan is set (even for WAIT, to enable monitoring)
+    assert engine.active_plan == mock_signal
     assert mock_client.fetch_historical_data.call_count == 2
     mock_analyst.analyze_market.assert_called_once()
 
     # Verify that the correct message was logged
-    assert "PLAN RESULT: Gemini advised WAIT." in caplog.text
+    assert (
+        "PLAN RESULT: Gemini advised WAIT. Proceeding to monitor mode for data collection."
+        in caplog.text
+    )
 
     # Ensure no trade was attempted
     mock_client.place_spread_bet_order.assert_not_called()

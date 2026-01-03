@@ -2,9 +2,11 @@ import logging
 import subprocess
 import json
 import threading
-from typing import Callable, Dict, Optional
+from datetime import datetime
+from typing import Callable, Dict, Optional, Any
 from src.ig_client import IGClient
 from config import IS_LIVE
+from src.database import save_candle
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +23,7 @@ class StreamManager:
             None  # For trade updates
         )
         self.is_connected = threading.Event()  # Event to signal connection status
+        self.active_candles: Dict[str, Dict[str, Any]] = {}  # Epic -> Candle Data
 
         self.ls_endpoint = "https://demo-apd.marketdatasystems.com"
         if IS_LIVE:
@@ -36,6 +39,59 @@ class StreamManager:
 
                     if message_type == "price_update":
                         epic = data.get("epic")
+                        bid = float(data.get("bid", 0))
+
+                        # Aggregation Logic (1-Min Candles)
+                        if epic and bid > 0:
+                            price = bid  # Use Bid price for OHLC
+                            now = datetime.now()
+                            current_minute_str = now.replace(
+                                second=0, microsecond=0
+                            ).isoformat()
+
+                            if epic not in self.active_candles:
+                                self.active_candles[epic] = {
+                                    "timestamp": current_minute_str,
+                                    "open": price,
+                                    "high": price,
+                                    "low": price,
+                                    "close": price,
+                                    "volume": 0,
+                                }
+
+                            candle = self.active_candles[epic]
+
+                            # If minute changed, flush old and start new
+                            if candle["timestamp"] != current_minute_str:
+                                # Save completed candle
+                                save_candle(
+                                    epic,
+                                    candle["open"],
+                                    candle["high"],
+                                    candle["low"],
+                                    candle["close"],
+                                    candle["volume"],
+                                    candle["timestamp"],
+                                )
+                                # Start new candle
+                                self.active_candles[epic] = {
+                                    "timestamp": current_minute_str,
+                                    "open": price,
+                                    "high": price,
+                                    "low": price,
+                                    "close": price,
+                                    "volume": 0,
+                                }
+                                candle = self.active_candles[epic]
+
+                            # Update current candle
+                            if price > candle["high"]:
+                                candle["high"] = price
+                            if price < candle["low"]:
+                                candle["low"] = price
+                            candle["close"] = price
+                            candle["volume"] += 1
+
                         if epic and epic in self.callbacks:
                             self.callbacks[epic](
                                 data
@@ -211,6 +267,22 @@ class StreamManager:
         """
         Stops the Node.js stream service subprocess.
         """
+        # Flush remaining candles
+        for epic, candle in self.active_candles.items():
+            try:
+                save_candle(
+                    epic,
+                    candle["open"],
+                    candle["high"],
+                    candle["low"],
+                    candle["close"],
+                    candle["volume"],
+                    candle["timestamp"],
+                )
+            except Exception as e:
+                logger.error(f"Failed to flush candle for {epic} on stop: {e}")
+        self.active_candles.clear()
+
         if self.process and self.process.poll() is None:
             logger.info("Terminating Node.js stream service.")
             self.process.terminate()  # or .kill()

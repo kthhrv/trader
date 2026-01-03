@@ -28,6 +28,7 @@ from src.ig_client import IGClient
 from src.trade_monitor_db import TradeMonitorDB
 from src.stream_manager import StreamManager
 from src.scorecard import generate_scorecard
+from src.opportunity_analyzer import OpportunityAnalyzer
 
 warnings.simplefilter(action="ignore", category=FutureWarning)
 
@@ -123,6 +124,157 @@ MARKET_CONFIGS = {
         "max_spread": 2.0,
     },
 }
+
+
+def run_opportunity_check(market_key: str, force_api_fetch: bool = False):
+    """
+    Checks for missed 'Power Law' moments for the given market today.
+    """
+    if market_key not in MARKET_CONFIGS:
+        logger.error(f"Unknown market key: {market_key}")
+        return
+
+    config = MARKET_CONFIGS[market_key]
+    analyzer = OpportunityAnalyzer()
+
+    print(
+        f"\nAnalyzing {config['strategy_name']} for potential missed opportunities..."
+    )
+    result = analyzer.analyze_session(config, force_api_fetch=force_api_fetch)
+
+    print(f"{'=' * 60}")
+    print(f"OPPORTUNITY REPORT: {result['date']} ({result['market']})")
+    print(f"{'=' * 60}")
+
+    if result.get("status") in ["NO_DATA", "ERROR", "NO_SESSION_DATA", "SKIPPED"]:
+        print(f"Analysis Status: {result.get('status')}")
+        print(f"Reason: {result.get('reason')}")
+    else:
+        print(f"Session Range:  {result['session_range']} points")
+        print(f"Daily ATR:      {result['daily_atr']}")
+        print(f"Power Factor:   {result['power_factor']} (Threshold: 0.5)")
+        print(f"Direction:      {result['direction']}")
+        print(f"{'-' * 60}")
+        print(f"Was Power Law?  {'YES' if result['is_power_law'] else 'NO'}")
+        print(f"Bot Status:     {result['bot_status']}")
+
+        if result["is_power_law"]:
+            if result["bot_status"] == "TRADED":
+                outcome = result["trade_details"]["outcome"]
+                pnl = result["trade_details"].get("pnl", "N/A")
+                print(f"SUCCESS: Bot caught the move. Outcome: {outcome} (PnL: {pnl})")
+            elif result["bot_status"] == "MISSED_AI":
+                print("MISSED (AI): Market moved, but AI advised WAIT.")
+                if result["trade_details"]:
+                    print(
+                        f"AI Reasoning: {result['trade_details']['reasoning'][:100]}..."
+                    )
+            elif result["bot_status"] == "MISSED_EXECUTION":
+                print(
+                    "MISSED (EXECUTION): Signal generated but trade TIMED_OUT (Entry not hit)."
+                )
+            elif result["bot_status"] == "NO_ACTION":
+                print("MISSED (OFFLINE): No logs found. Bot may not have run.")
+        else:
+            print("Market condition was normal (not a Power Law event).")
+
+    print(f"{'=' * 60}\n")
+
+
+def run_weekly_powerlaw_check(force_api_fetch: bool = False):
+    """
+    Iterates through the current week (Monday to Today) and checks all markets
+    for Power Law opportunities.
+    """
+    logger.info("Starting Weekly Power Law Event Scan...")
+
+    # Initialize Client once to reuse session and avoid rate limits
+    client = IGClient()
+    analyzer = OpportunityAnalyzer(client=client)
+
+    today = datetime.now().date()
+
+    # Calculate Monday of the current week
+    start_of_week = today - timedelta(days=today.weekday())
+
+    print(f"\n{'=' * 100}")
+    print(f"{'WEEKLY POWER LAW REPORT':^100}")
+    print(f"Period: {start_of_week} to {today}")
+    print(f"{'=' * 100}")
+    print(
+        f"{'Date':<12} | {'Market':<15} | {'Range':<8} | {'DailyATR':<8} | {'Factor':<6} | {'Status':<15} | {'Outcome'}"
+    )
+    print("-" * 100)
+
+    power_law_count = 0
+    missed_count = 0
+    caught_count = 0
+
+    current_date = start_of_week
+    while current_date <= today:
+        date_str = current_date.isoformat()
+
+        # Skip weekends if desired, but let's just check configured markets
+        # Some might run on weekends? Unlikely for indices.
+        if current_date.weekday() >= 5:  # Sat/Sun
+            current_date += timedelta(days=1)
+            continue
+
+        for market_key, config in MARKET_CONFIGS.items():
+            # Run analysis
+            # Suppress logging noise during batch run if possible, or just accept it
+            try:
+                result = analyzer.analyze_session(
+                    config, date_str=date_str, force_api_fetch=force_api_fetch
+                )
+
+                if result.get("status") in [
+                    "NO_DATA",
+                    "ERROR",
+                    "NO_SESSION_DATA",
+                    "SKIPPED",
+                ]:
+                    # Don't clutter with errors for missing data (e.g. holidays) or skipped fetches
+                    continue
+
+                # Format Output
+                market_name = config["strategy_name"].replace(" OPEN", "")
+                rnge = str(result.get("session_range", 0))
+                atr = str(result.get("daily_atr", 0))
+                factor = str(result.get("power_factor", 0))
+                status = result.get("bot_status", "N/A")
+                is_pl = result.get("is_power_law", False)
+
+                outcome_str = ""
+                if status == "TRADED":
+                    outcome_str = f"{result['trade_details']['outcome']} (PnL: {result['trade_details'].get('pnl', 'N/A')})"
+
+                # Highlight Power Law Events
+                if is_pl:
+                    power_law_count += 1
+                    factor_display = f"*{factor}*"
+                    if status == "TRADED":
+                        caught_count += 1
+                    else:
+                        missed_count += 1
+                else:
+                    factor_display = factor
+
+                # Only print if it's interesting (Power Law OR Traded)
+                # Or print all for completeness? Let's print all valid sessions.
+                print(
+                    f"{date_str:<12} | {market_name:<15} | {rnge:<8} | {atr:<8} | {factor_display:<6} | {status:<15} | {outcome_str}"
+                )
+
+            except Exception as e:
+                logger.error(f"Error checking {market_key} on {date_str}: {e}")
+
+        current_date += timedelta(days=1)
+
+    print("-" * 100)
+    print(f"Summary: {power_law_count} Power Law Events detected.")
+    print(f"Caught: {caught_count} | Missed: {missed_count}")
+    print(f"{'=' * 100}\n")
 
 
 def run_test_trade(epic: str, dry_run: bool = False, trade_action: str = "BUY"):
@@ -948,6 +1100,21 @@ def main():
         help="Action for --test-trade: 'BUY' or 'SELL'. Defaults to BUY.",
     )
     parser.add_argument(
+        "--check-missed",
+        action="store_true",
+        help="Check if a 'Power Law' opportunity was missed today (requires --market).",
+    )
+    parser.add_argument(
+        "--weekly-powerlaw-events",
+        action="store_true",
+        help="Scan the current week (Mon-Today) for Power Law events across all markets.",
+    )
+    parser.add_argument(
+        "--force-api-fetch",
+        action="store_true",
+        help="When using --check-missed or --weekly-powerlaw-events, force fetching data from IG API if local data is missing.",
+    )
+    parser.add_argument(
         "--verbose", "-v", action="store_true", help="Print live prices to console"
     )
 
@@ -981,6 +1148,19 @@ def main():
     # Register signal handlers
     signal.signal(signal.SIGINT, graceful_shutdown)
     signal.signal(signal.SIGTERM, graceful_shutdown)
+
+    if args.weekly_powerlaw_events:
+        run_weekly_powerlaw_check(force_api_fetch=args.force_api_fetch)
+        return
+
+    if args.check_missed:
+        if args.market:
+            run_opportunity_check(args.market, force_api_fetch=args.force_api_fetch)
+        else:
+            logger.error(
+                "Please specify a market with --market when using --check-missed."
+            )
+        return
 
     if args.sync_trade:
         run_sync_trade(args.sync_trade)

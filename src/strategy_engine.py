@@ -243,7 +243,12 @@ class StrategyEngine:
                         else "UNKNOWN",
                     )
                 else:
-                    logger.info("PLAN RESULT: Gemini advised WAIT.")
+                    logger.info(
+                        "PLAN RESULT: Gemini advised WAIT. Proceeding to monitor mode for data collection."
+                    )
+                    self.active_plan = (
+                        signal  # KEEP plan active to trigger stream recording
+                    )
                     self.trade_logger.log_trade(
                         epic=self.epic,
                         plan=signal,
@@ -254,7 +259,7 @@ class StrategyEngine:
                         if signal.entry_type
                         else "UNKNOWN",
                     )
-                    self.active_plan = None
+                    # self.active_plan = None # Removed to allow execution loop
                 logger.info(f"reasoning: {signal.reasoning}")
             else:
                 logger.warning("PLAN RESULT: Gemini signal generation failed.")
@@ -430,7 +435,9 @@ class StrategyEngine:
                 current_time = time.time()
                 if current_time - last_log_time > 10:
                     wait_msg = ""
-                    if plan.entry_type == EntryType.INSTANT:
+                    if plan.action == Action.WAIT:
+                        wait_msg = "Monitoring Mode (WAIT): Recording data only."
+                    elif plan.entry_type == EntryType.INSTANT:
                         if plan.action == Action.BUY:
                             wait_msg = f"Waiting for BUY trigger (INSTANT): Offer {offer_snapshot} >= {plan.entry}"
                         elif plan.action == Action.SELL:
@@ -448,6 +455,11 @@ class StrategyEngine:
 
                 # --- Spread and Trigger Logic ---
                 current_spread = round(abs(offer_snapshot - bid_snapshot), 2)
+
+                # If Action is WAIT, we just loop until timeout (recording data via stream manager)
+                if plan.action == Action.WAIT:
+                    continue
+
                 triggered = False
 
                 if current_spread > self.max_spread:
@@ -540,6 +552,20 @@ class StrategyEngine:
                         )
                     # Whether successful or not, we break after one attempt.
                     break  # Exit the monitoring loop
+
+            # --- Post-Trade / Post-Trigger Data Recording ---
+            # If the trade finished (SL/TP) or was skipped, but we still have time left in the session,
+            # continue running to record market data for the full window.
+            elapsed = time.time() - start_time
+            remaining = timeout_seconds - elapsed
+
+            if remaining > 0:
+                logger.info(
+                    f"Session active. Continuing to record market data for {remaining:.0f}s until timeout..."
+                )
+                while time.time() - start_time < timeout_seconds:
+                    time.sleep(5)  # Sleep while StreamManager records in background
+                logger.info("Session timeout reached.")
 
         except KeyboardInterrupt:
             logger.info("Execution stopped by user.")

@@ -70,19 +70,22 @@ class TestTradeMonitorDB(unittest.TestCase):
         self.assertFalse(monitor_thread.is_alive(), "Monitor thread failed to exit")
 
         # Check DB update
-        mock_update_db.assert_called_once()
-        args = mock_update_db.call_args[0]
-        # deal_id, exit_price, pnl, exit_time, outcome, db_path
-        self.assertEqual(args[0], deal_id)
-        self.assertEqual(args[1], 105.0)
-        self.assertEqual(args[2], 50.5)
-        # outcome is passed as a keyword argument in the actual code call,
-        # but let's check how it's captured.
-        # The code is: update_trade_outcome(..., outcome=status, ...)
-        # args might only contain positional args if outcome was passed as kwarg
-        # Let's check call_args kwargs
-        kwargs = mock_update_db.call_args[1]
-        self.assertEqual(kwargs["outcome"], "CLOSED")
+        # We iterate through calls to find the one for our specific deal_id
+        # to avoid interference from stray threads in other tests.
+        found_call = False
+        for call in mock_update_db.call_args_list:
+            args = call[0]
+            kwargs = call[1]
+            if args[0] == deal_id:
+                self.assertEqual(args[1], 105.0)  # Exit Price
+                self.assertEqual(args[2], 50.5)  # PnL
+                self.assertEqual(kwargs.get("outcome"), "CLOSED")
+                found_call = True
+                break
+
+        self.assertTrue(
+            found_call, f"update_trade_outcome was not called for deal {deal_id}"
+        )
 
     @patch("src.trade_monitor_db.update_trade_outcome")
     def test_update_db_exception(self, mock_update_db):

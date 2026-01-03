@@ -95,6 +95,39 @@ def init_db(db_path=None):
         except Exception as e:
             logger.error(f"Migration failed: {e}")
 
+    # Market Candles (1-Minute Aggregation)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS market_candles_1m (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT,
+            epic TEXT,
+            open REAL,
+            high REAL,
+            low REAL,
+            close REAL,
+            volume INTEGER
+        )
+    """)
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_market_candles_1m_epic_timestamp ON market_candles_1m (epic, timestamp)"
+    )
+
+    # Market Data Table (Ticks)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS market_data (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT,
+            epic TEXT,
+            bid REAL,
+            offer REAL,
+            volume INTEGER
+        )
+    """)
+    # Create index for fast time-range queries
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_market_data_epic_timestamp ON market_data (epic, timestamp)"
+    )
+
     conn.commit()
     conn.close()
     logger.info(f"Database initialized at {db_path if db_path else DB_PATH}")
@@ -321,6 +354,117 @@ def sync_active_trade(
         conn.commit()
     except Exception as e:
         logger.error(f"Failed to sync trade to DB: {e}")
+    finally:
+        conn.close()
+
+
+def save_candle(
+    epic: str,
+    open_price: float,
+    high: float,
+    low: float,
+    close: float,
+    volume: int,
+    timestamp: str,
+    db_path=None,
+):
+    """
+    Logs a 1-minute candle to the database.
+    """
+    conn = get_db_connection(db_path)
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            """
+            INSERT INTO market_candles_1m (timestamp, epic, open, high, low, close, volume) 
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (timestamp, epic, open_price, high, low, close, volume),
+        )
+        conn.commit()
+    except Exception as e:
+        logger.error(f"Failed to save candle: {e}")
+    finally:
+        conn.close()
+
+
+def save_market_tick(
+    epic: str,
+    bid: float,
+    offer: float,
+    volume: int = 0,
+    timestamp: str = None,
+    db_path=None,
+):
+    """
+    Logs a single market tick (price update) to the database.
+    Timestamp defaults to datetime.now().isoformat() if not provided.
+    """
+    if not timestamp:
+        from datetime import datetime
+
+        timestamp = datetime.now().isoformat()
+
+    conn = get_db_connection(db_path)
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "INSERT INTO market_data (timestamp, epic, bid, offer, volume) VALUES (?, ?, ?, ?, ?)",
+            (timestamp, epic, bid, offer, volume),
+        )
+        conn.commit()
+    except Exception as e:
+        logger.error(f"Failed to save market tick: {e}")
+    finally:
+        conn.close()
+
+
+def fetch_market_data_range(epic: str, start_time: str, end_time: str, db_path=None):
+    """
+    Fetches raw market ticks for a given epic and time range.
+    """
+    conn = get_db_connection(db_path)
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            """
+            SELECT * FROM market_data 
+            WHERE epic = ? AND timestamp BETWEEN ? AND ?
+            ORDER BY timestamp ASC
+        """,
+            (epic, start_time, end_time),
+        )
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+    except Exception as e:
+        logger.error(f"Failed to fetch market data range: {e}")
+        return []
+    finally:
+        conn.close()
+
+
+def fetch_candles_range(epic: str, start_time: str, end_time: str, db_path=None):
+    """
+    Fetches 1-minute candles for a given epic and time range.
+    Returns a list of dictionaries with keys: timestamp, open, high, low, close, volume.
+    """
+    conn = get_db_connection(db_path)
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            """
+            SELECT timestamp, open, high, low, close, volume 
+            FROM market_candles_1m 
+            WHERE epic = ? AND timestamp BETWEEN ? AND ?
+            ORDER BY timestamp ASC
+        """,
+            (epic, start_time, end_time),
+        )
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+    except Exception as e:
+        logger.error(f"Failed to fetch candles range: {e}")
+        return []
     finally:
         conn.close()
 
