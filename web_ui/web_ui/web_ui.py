@@ -4,12 +4,12 @@ import os
 import pandas as pd
 from datetime import datetime, timedelta
 import plotly.graph_objects as go  # Import Plotly
+# pytz removed as we use rx.moment for client-side time
 
 # Add parent directory to path to import src
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../")))
 
 from src.database import fetch_candles_range, fetch_trades_in_range
-from src.market_status import MarketStatus
 
 # IGClient removed
 from src.scorecard import get_scorecard_data
@@ -22,16 +22,8 @@ class State(rx.State):
     pnl_history: list[dict] = []
 
     # Date Filter State
-    start_date: str = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+    start_date: str = "2026-01-05"
     end_date: str = datetime.now().strftime("%Y-%m-%d")
-
-    # Market Status
-    uk_status: str = "Checking..."
-    us_status: str = "Checking..."
-    jp_status: str = "Checking..."
-    de_status: str = "Checking..."
-    au_status: str = "Checking..."
-    ndx_status: str = "Checking..."
 
     # Scorecard Stats
     win_rate: float = 0.0
@@ -119,15 +111,6 @@ class State(rx.State):
             print(f"Error fetching data: {e}")
             self.trades = []
             self.pnl_history = []
-
-        # Check Market Status
-        ms = MarketStatus()
-        self.uk_status = ms.get_market_status("IX.D.FTSE.DAILY.IP")
-        self.us_status = ms.get_market_status("IX.D.SPTRD.DAILY.IP")
-        self.jp_status = ms.get_market_status("IX.D.NIKKEI.DAILY.IP")
-        self.de_status = ms.get_market_status("IX.D.DAX.DAILY.IP")
-        self.au_status = ms.get_market_status("IX.D.ASX.MONTH1.IP")
-        self.ndx_status = ms.get_market_status("IX.D.NASDAQ.CASH.IP")
 
         self.last_updated = datetime.now().strftime("%H:%M:%S")
 
@@ -586,14 +569,17 @@ class State(rx.State):
         self.is_fullscreen = False
 
 
-def status_badge(label: str, status: str) -> rx.Component:
+def clock_badge(label: str, timezone: str) -> rx.Component:
     return rx.card(
         rx.vstack(
             rx.text(label, font_size="0.8em", font_weight="bold"),
-            rx.text(
-                status,
-                color=rx.cond(status.to_string().contains("CLOSED"), "red", "green"),
+            rx.moment(
+                format="HH:mm:ss",
+                tz=timezone,
+                interval=1000,
                 font_weight="bold",
+                font_family="monospace",
+                font_size="1.2em",
             ),
         ),
         padding="1em",
@@ -713,12 +699,12 @@ def index() -> rx.Component:
         rx.vstack(
             rx.heading("Gemini Trader Bot", size="8"),
             rx.grid(
-                status_badge("London", State.uk_status),
-                status_badge("Germany", State.de_status),
-                status_badge("Nikkei", State.jp_status),
-                status_badge("NY (S&P)", State.us_status),
-                status_badge("US Tech", State.ndx_status),
-                status_badge("Australia", State.au_status),
+                clock_badge("Australia", "Australia/Sydney"),
+                clock_badge("Nikkei", "Asia/Tokyo"),
+                clock_badge("Germany", "Europe/Berlin"),
+                clock_badge("London", "Europe/London"),
+                clock_badge("NY (S&P)", "America/New_York"),
+                clock_badge("US Tech", "America/New_York"),
                 columns="6",
                 spacing="2",
                 width="100%",
@@ -816,13 +802,13 @@ def index() -> rx.Component:
                         rx.table.column_header_cell("Date"),
                         rx.table.column_header_cell("Ticker"),
                         rx.table.column_header_cell("Action"),
-                        rx.table.column_header_cell("Entry"),
-                        rx.table.column_header_cell("Init SL"),
-                        rx.table.column_header_cell("Final SL"),
-                        rx.table.column_header_cell("Exit"),
-                        rx.table.column_header_cell("PnL"),
-                        rx.table.column_header_cell("Outcome"),
-                        rx.table.column_header_cell("View"),
+                        rx.table.cell("Entry"),
+                        rx.table.cell("Init SL"),
+                        rx.table.cell("Final SL"),
+                        rx.table.cell("Exit"),
+                        rx.table.cell("PnL"),
+                        rx.table.cell("Outcome"),
+                        rx.table.cell("View"),
                     ),
                 ),
                 rx.table.body(
