@@ -16,7 +16,6 @@ class Action(str, Enum):
 
 class EntryType(str, Enum):
     INSTANT = "INSTANT"
-    CONFIRMATION = "CONFIRMATION"
 
 
 class NewsQuality(BaseModel):
@@ -40,7 +39,7 @@ class TradingSignal(BaseModel):
     entry: float = Field(description="The suggested entry price level.")
 
     entry_type: EntryType = Field(
-        description="The type of entry: 'INSTANT' (execute immediately when price touches level) or 'CONFIRMATION' (wait for 1-minute candle close beyond level). Default to INSTANT for high momentum, CONFIRMATION for risky setups."
+        description="The type of entry: 'INSTANT' (execute immediately when price touches level). All trades now use INSTANT entry for maximum wave capture."
     )
 
     stop_loss: float = Field(description="The stop loss price level.")
@@ -87,9 +86,7 @@ class GeminiAnalyst:
             1. Always analyze the risk/reward ratio. Ensure Stop Loss is logical based on recent support/resistance and **AT LEAST 1.5x to 2.0x ATR** from the entry price (especially for volatile markets like Nikkei), with a minimum of 10 POINTS.
             2. **Structure over Arbitrary Ratios:** Do not place stops inside the rejection zone. If the structural invalidation point (e.g. 6829) requires a stop that is too wide for the account risk parameters, reduce position size rather than tightening the stop to an arbitrary level (e.g. 6816).
             3. If the market conditions are choppy, low liquidity, or unclear (e.g., conflicting signals), recommend 'WAIT'.
-            4. **Entry Type Strategy:**
-               - Select **'INSTANT'** only if momentum is exceptionally strong.
-               - Prefer **'CONFIRMATION'** (wait for 1-minute candle close) or consider waiting for a **retest** of the breakout level to improve Risk/Reward and avoid fakeouts.
+            4. **Entry Strategy:** All trades must use **'INSTANT'** entry type. Focus on identifying the exact breakout level where the 'wave' starts.
             5. **Trailing Stop Strategy:**
                - Set **'use_trailing_stop' = True** if the setup is a high-momentum breakout where price could run significantly (Trend Following).
                - Set **'use_trailing_stop' = False** if the setup is targeting a specific resistance level or trading inside a range (Mean Reversion), where a fixed Take Profit is better.
@@ -97,7 +94,7 @@ class GeminiAnalyst:
                *   **Market Overview:** Summarize the current trend, volatility (ATR), and momentum (RSI).
                *   **Key Levels:** Identify significant support and resistance levels from the OHLC data.
                *   **News Sentiment:** Evaluate the overall sentiment from the provided news headlines (Positive, Negative, Neutral).
-               *   **Trade Rationale:** Based on the above, explain WHY a BUY/SELL/WAIT signal is generated. Justify entry, stop loss, take profit, trade size, and why the **ATR-based stop** is appropriate. Explicitly justify the choice of 'INSTANT' vs 'CONFIRMATION' entry AND 'use_trailing_stop'. Ensure Stop Loss is NOT placed *within* the range of the opening 5-minute candle; instead, aim for structural lows (e.g., below the 08:00 low for a BUY).
+               *   **Trade Rationale:** Based on the above, explain WHY a BUY/SELL/WAIT signal is generated. Justify entry, stop loss, take profit, trade size, and why the **ATR-based stop** is appropriate. Explicitly justify 'use_trailing_stop'. Ensure Stop Loss is NOT placed *within* the range of the opening 5-minute candle; instead, aim for structural lows (e.g., below the 08:00 low for a BUY).
                *   **Risk/Reward:** Briefly state the estimated risk/reward for the proposed trade.
             7. After the Chain-of-Thought, your final output MUST be strictly in the requested JSON format, and ONLY the JSON. Ensure the 'atr' field reflects the current ATR value provided in the market context.
             """
@@ -147,7 +144,7 @@ class GeminiAnalyst:
             Analyze the quality of the following news headlines for trading the '{market_name}' market.
             
             Criteria for High Score (8-10):
-            - Recent (within last 24h).
+            - Recent (within last 24 hours).
             - Highly relevant to the specific asset/index (not just generic global news).
             - Contains substantive economic data or strong sentiment drivers.
             
@@ -242,7 +239,7 @@ class GeminiAnalyst:
                     agg_dict["volume"] = "sum"
 
                 price_history_context = f"""
-        **Broader Market Context (1H before to Present):**
+        **Broader Market Context (1 Hour before to Present):**
         - Period High: {period_high}
         - Period Low: {period_low}
         - Open: {period_open}
@@ -349,7 +346,7 @@ if __name__ == "__main__":
 
     mock_data = """
     Ticker: FTSE100
-    Timeframe: 15min
+    Timeframe: 15 minutes
     Last Price: 7500.0
     ATR (14): 15.0
     RSI (14): 60.0

@@ -1,161 +1,116 @@
-import unittest
-from unittest.mock import MagicMock, ANY
-from src.strategy_engine import StrategyEngine
-from src.gemini_analyst import TradingSignal, Action, EntryType
-from tests.mocks import (
-    MockIGClient,
-    MockGeminiAnalyst,
-    MockNewsFetcher,
-    MockMarketStatus,
-    MockStreamManager,
-)
+import pytest
+from unittest.mock import MagicMock, patch, ANY
+import pandas as pd
+from src.strategy_engine import StrategyEngine, Action, TradingSignal, EntryType
 
 
-class TestSlippageHandling(unittest.TestCase):
-    def setUp(self):
-        # Setup mocks
-        self.mock_client = MockIGClient()
-        self.mock_analyst = MockGeminiAnalyst()
-        self.mock_news = MockNewsFetcher()
-        self.mock_market_status = MockMarketStatus()
-        self.mock_trade_logger = MagicMock()
-        self.mock_trade_monitor = MagicMock()
-        self.mock_stream_manager = MockStreamManager()
+@pytest.fixture
+def mock_components():
+    with (
+        patch("src.strategy_engine.IGClient") as mock_client_cls,
+        patch("src.strategy_engine.GeminiAnalyst") as mock_analyst_cls,
+        patch("src.strategy_engine.NewsFetcher") as mock_news_cls,
+        patch("src.strategy_engine.TradeLoggerDB") as mock_trade_logger_cls,
+        patch("src.strategy_engine.TradeMonitorDB") as mock_trade_monitor_cls,
+        patch("src.strategy_engine.MarketStatus") as mock_market_status_cls,
+        patch("src.strategy_engine.StreamManager") as mock_stream_manager_cls,
+    ):
+        mock_client = mock_client_cls.return_value
+        _ = mock_analyst_cls.return_value
+        _ = mock_news_cls.return_value  # Unused
+        mock_trade_logger = mock_trade_logger_cls.return_value
+        _ = mock_trade_monitor_cls.return_value  # Unused
+        mock_market_status = mock_market_status_cls.return_value
+        mock_stream_manager = mock_stream_manager_cls.return_value
 
-        # Initialize StrategyEngine with injected mocks
-        self.engine = StrategyEngine(
-            epic="IX.D.FTSE.DAILY.IP",
-            strategy_name="TEST_STRATEGY",
-            ig_client=self.mock_client,
-            analyst=self.mock_analyst,
-            news_fetcher=self.mock_news,
-            trade_logger=self.mock_trade_logger,
-            trade_monitor=self.mock_trade_monitor,
-            market_status=self.mock_market_status,
-            stream_manager=self.mock_stream_manager,
-            dry_run=False,
-        )
+        mock_market_status.is_holiday.return_value = False
+        mock_client.service = MagicMock()
+        mock_client.service.account_id = "TEST_ACC_ID"
 
-    def test_slippage_capture(self):
-        """
-        Test that when the actual execution price differs from the plan (slippage),
-        the actual price is used for DB update and monitoring.
-        """
-        # 1. Define a Plan
-        planned_entry = 7500.0
-        actual_fill = 7490.0  # Slippage of 10 points
-
-        plan = TradingSignal(
-            ticker="FTSE100",
-            action=Action.SELL,
-            entry=planned_entry,
-            stop_loss=7520.0,
-            take_profit=7450.0,
-            confidence="high",
-            reasoning="Bearish setup",
-            size=1.0,
-            atr=10.0,
-            entry_type=EntryType.INSTANT,
-            use_trailing_stop=True,
-        )
-        self.engine.active_plan = plan
-
-        # Simulate PENDING log creation
-        self.engine.active_plan_id = 123
-
-        # 2. Configure Mock Client to return Actual Fill
-        self.mock_client.place_spread_bet_order.return_value = {
-            "dealId": "DEAL_XYZ",
-            "dealStatus": "ACCEPTED",
-            "level": str(
-                actual_fill
-            ),  # IG returns levels as strings sometimes, or we should handle it
-            "reason": "SUCCESS",
-        }
-
-        # 3. Simulate Price Trigger (Instant Entry logic)
-        # We need to trigger the loop in execute_strategy.
-        # But for this test, we can directly call _place_market_order
-        # to isolate the logic we care about (the handling of the confirmation).
-        # _place_market_order is where the fix was applied.
-
-        current_spread = 1.0
-        success = self.engine._place_market_order(plan, current_spread, dry_run=False)
-
-        self.assertTrue(success, "Market order should have been placed successfully")
-
-        # 4. Assertions
-
-        # A) Check that TradeLoggerDB.update_trade_status was called with the ACTUAL fill
-        self.mock_trade_logger.update_trade_status.assert_called_with(
-            row_id=123,
-            outcome="LIVE_PLACED",
-            deal_id="DEAL_XYZ",
-            size=ANY,
-            entry=actual_fill,  # THE CRITICAL ASSERTION
-        )
-
-        # B) Check that TradeMonitorDB.monitor_trade was called with the ACTUAL fill
-        self.mock_trade_monitor.monitor_trade.assert_called_with(
-            "DEAL_XYZ",
-            "IX.D.FTSE.DAILY.IP",
-            entry_price=actual_fill,  # THE CRITICAL ASSERTION
-            stop_loss=plan.stop_loss,
-            atr=plan.atr,
-            use_trailing_stop=plan.use_trailing_stop,
-        )
-
-    def test_missing_fill_level_fallback(self):
-        """
-        Test fallback behavior when 'level' is missing from confirmation.
-        Should revert to using planned entry.
-        """
-        planned_entry = 7500.0
-
-        plan = TradingSignal(
-            ticker="FTSE100",
-            action=Action.SELL,
-            entry=planned_entry,
-            stop_loss=7520.0,
-            take_profit=7450.0,
-            confidence="high",
-            reasoning="Bearish setup",
-            size=1.0,
-            atr=10.0,
-            entry_type=EntryType.INSTANT,
-            use_trailing_stop=True,
-        )
-        self.engine.active_plan = plan
-        self.engine.active_plan_id = 124
-
-        # Return confirmation WITHOUT 'level'
-        self.mock_client.place_spread_bet_order.return_value = {
-            "dealId": "DEAL_ABC",
-            "dealStatus": "ACCEPTED",
-            # "level": missing
-        }
-
-        success = self.engine._place_market_order(plan, 1.0, dry_run=False)
-        self.assertTrue(success)
-
-        # Assert Fallback to Planned Entry
-        self.mock_trade_logger.update_trade_status.assert_called_with(
-            row_id=124,
-            outcome="LIVE_PLACED",
-            deal_id="DEAL_ABC",
-            size=ANY,
-            entry=planned_entry,  # FALLBACK ASSERTION
-        )
-
-        self.mock_trade_monitor.monitor_trade.assert_called_with(
-            "DEAL_ABC",
-            "IX.D.FTSE.DAILY.IP",
-            entry_price=planned_entry,  # FALLBACK ASSERTION
-            stop_loss=plan.stop_loss,
-            atr=plan.atr,
-            use_trailing_stop=plan.use_trailing_stop,
+        yield (
+            mock_client,
+            mock_trade_logger,
+            mock_stream_manager,
         )
 
 
-if __name__ == "__main__":
-    unittest.main()
+def test_slippage_adjusts_stop_loss(mock_components, caplog):
+    """
+    Verifies that if price has moved past target, the trade is still entered
+    but the Stop Loss is moved up/down to maintain the original risk distance.
+    """
+    mock_client, mock_trade_logger, mock_stream_manager = mock_components
+
+    engine = StrategyEngine(
+        "IX.D.NIKKEI.DAILY.IP",
+        max_spread=10.0,
+        ig_client=mock_client,
+        trade_logger=mock_trade_logger,
+        stream_manager=mock_stream_manager,
+    )
+
+    # Setup plan: Entry 1000, Stop 900. Risk = 100 pts.
+    plan = TradingSignal(
+        ticker="NIKKEI",
+        action=Action.BUY,
+        entry=1000.0,
+        stop_loss=900.0,
+        take_profit=1200.0,
+        confidence="high",
+        reasoning="Test",
+        size=1,
+        atr=50.0,
+        entry_type=EntryType.INSTANT,
+        use_trailing_stop=True,
+    )
+    engine.active_plan = plan
+    engine.active_plan_id = 123
+
+    # Mock trigger at 1050 (50 points slippage)
+    def trigger_price_update(seconds):
+        # Provide price update
+        engine._stream_price_update_handler(
+            {
+                "epic": engine.epic,
+                "bid": 1045.0,
+                "offer": 1050.0,
+            }
+        )
+        # Advance time significantly to exit loops
+        current_time[0] += 2.0
+        return None
+
+    current_time = [100.0]
+
+    def mock_time():
+        return current_time[0]
+
+    mock_client.place_spread_bet_order.return_value = {"dealId": "OK", "level": 1050.0}
+    mock_client.get_account_info.return_value = pd.DataFrame(
+        {"accountId": ["TEST_ACC_ID"], "available": [10000]}
+    )
+
+    with (
+        patch("time.sleep", side_effect=trigger_price_update),
+        patch("time.time", side_effect=mock_time),
+    ):
+        engine.execute_strategy(timeout_seconds=5.0)
+
+    # Verify Trade was Placed
+    assert engine.position_open is True
+
+    # CRITICAL CHECK: Was the stop loss adjusted?
+    # Original Risk = 100. Actual Entry = 1050. New Stop should be 950.
+    mock_client.place_spread_bet_order.assert_called_once_with(
+        epic=ANY,
+        direction="BUY",
+        size=ANY,
+        level=1050.0,
+        stop_level=950.0,  # Adjusted!
+        limit_level=None,
+    )
+
+    # Verify DB update reflects the adjusted entry
+    mock_trade_logger.update_trade_status.assert_any_call(
+        row_id=123, outcome="LIVE_PLACED", deal_id="OK", size=ANY, entry=1050.0
+    )

@@ -16,7 +16,7 @@ def sample_trades():
             "pnl": 50.0,
             "deal_id": "DEAL_1",
             "confidence": "HIGH",
-            "entry_type": "CONFIRMATION",
+            "entry_type": "INSTANT",
         },
         # Loss
         {
@@ -51,7 +51,7 @@ def sample_trades():
             "pnl": None,
             "deal_id": "TIMEOUT_123",
             "confidence": "MEDIUM",
-            "entry_type": "CONFIRMATION",
+            "entry_type": "INSTANT",
         },
     ]
 

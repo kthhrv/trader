@@ -1,11 +1,12 @@
 import pytest
-from unittest.mock import MagicMock
-import unittest.mock
+from unittest.mock import MagicMock, patch
 import pandas as pd
 import os
 import tempfile
 import logging
 from datetime import datetime, timedelta
+import json
+import time
 
 from src.strategy_engine import StrategyEngine, Action, TradingSignal
 from src.database import get_db_connection, init_db, fetch_trade_data
@@ -17,6 +18,9 @@ from tests.mocks import (
     MockStreamManager,
     MockMarketStatus,
 )
+
+# Capture real sleep for testing delays
+real_sleep = time.sleep
 
 logger = logging.getLogger(__name__)
 
@@ -170,87 +174,93 @@ def test_e2e_trading_flow(e2e_mocks, caplog):
     # and we need to simulate price ticks concurrently.
     from threading import Thread
 
-    trade_execution_thread = Thread(
-        target=engine.execute_strategy, kwargs={"timeout_seconds": 3.0}
-    )
-    trade_execution_thread.start()
+    # Patch sleeps to speed up test execution (Fast Sleep: 1/100th duration)
+    # This prevents busy loops from hanging and allows timeouts to work naturally but fast.
+    def fast_sleep(x):
+        real_sleep(x / 100.0)
 
-    # Give the engine a moment to connect to the stream (mocked)
-    import time
-
-    time.sleep(0.1)
-
-    # Verify stream manager was told to connect and subscribe
-    mock_stream_manager.connect_and_subscribe.assert_called_once_with(
-        epic, engine._stream_price_update_handler
-    )
-
-    # 5. Simulate Price Ticks to trigger entry
-    # Price moves below entry, then hits entry
-    mock_stream_manager.simulate_price_tick(epic, entry_price - 5, entry_price - 4)
-    time.sleep(0.1)
-    mock_stream_manager.simulate_price_tick(epic, entry_price, entry_price + 1)
-    time.sleep(0.5)  # Increased sleep here to allow processing
-
-    # Ensure trade placement was attempted
-    mock_ig_client.place_spread_bet_order.assert_called_once()
-    call_kwargs = mock_ig_client.place_spread_bet_order.call_args[1]
-    assert call_kwargs["direction"] == "BUY"
-    assert call_kwargs["size"] == 2.0  # Calculated: 10000 * 0.01 / (7500 - 7450) = 2.0
-    assert call_kwargs["stop_level"] == stop_loss
-    assert call_kwargs["limit_level"] is None
-    # Verify trade monitor started
-    mock_trade_monitor.monitor_trade.assert_called_once_with(
-        "MOCK_DEAL_ID",
-        epic,
-        entry_price=entry_price,
-        stop_loss=stop_loss,
-        atr=10.0,
-        use_trailing_stop=True,
-    )
-
-    # 6. Simulate Trade Closure via Stream Update
-    # Mock IG Client fetch_transaction_history_by_deal_id for PnL
-    mock_history_df = pd.DataFrame(
-        [
-            {
-                "dealReference": "REF",
-                "profitAndLoss": "£50.00",
-                "openLevel": 7500.0,
-                "closeLevel": 7600.0,
-            }
-        ]
-    )
-    mock_ig_client.fetch_transaction_history_by_deal_id.return_value = mock_history_df
-
-    # Manually trigger the closure callback on monitor
-    # We need to construct the payload as the monitor expects
-    import json
-
-    close_payload = json.dumps(
-        {
-            "dealId": "MOCK_DEAL_ID",
-            "status": "CLOSED",
-            "level": 7600.0,
-            "profitAndLoss": 50.0,
-        }
-    )
-
-    # Wait briefly for monitor to be running and subscribed
-    time.sleep(0.2)
-
-    # Trigger callback
-    mock_trade_monitor._handle_trade_update(
-        {"type": "trade_update", "payload": close_payload}
-    )
-
-    # Allow monitor to poll and detect closure
-    # We patch time.sleep inside the trade_monitor module to avoid waiting 50s
-    with unittest.mock.patch(
-        "src.trade_monitor_db.time.sleep", side_effect=lambda x: None
+    with (
+        patch("src.strategy_engine.time.sleep", side_effect=fast_sleep),
+        patch("src.trade_monitor_db.time.sleep", side_effect=fast_sleep),
     ):
-        trade_execution_thread.join(timeout=10.0)  # Wait for the thread to finish
-    assert not trade_execution_thread.is_alive()
+        trade_execution_thread = Thread(
+            target=engine.execute_strategy, kwargs={"timeout_seconds": 3.0}
+        )
+        trade_execution_thread.start()
+
+        # Give the engine a moment to connect to the stream (mocked)
+        real_sleep(0.1)
+
+        # Verify stream manager was told to connect and subscribe
+        mock_stream_manager.connect_and_subscribe.assert_called_once_with(
+            epic, engine._stream_price_update_handler
+        )
+
+        # 5. Simulate Price Ticks to trigger entry
+        # Price moves below entry, then hits entry
+        mock_stream_manager.simulate_price_tick(epic, entry_price - 5, entry_price - 4)
+        real_sleep(0.1)
+        mock_stream_manager.simulate_price_tick(epic, entry_price, entry_price + 1)
+        real_sleep(0.5)  # Increased sleep here to allow processing
+
+        # Ensure trade placement was attempted
+        mock_ig_client.place_spread_bet_order.assert_called_once()
+        call_kwargs = mock_ig_client.place_spread_bet_order.call_args[1]
+        assert call_kwargs["direction"] == "BUY"
+        assert (
+            call_kwargs["size"] == 2.0
+        )  # Calculated: 10000 * 0.01 / (7500 - 7450) = 2.0
+        assert call_kwargs["stop_level"] == 7451.0  # Adjusted for slippage (7501 - 50)
+        assert call_kwargs["limit_level"] is None
+        # Verify trade monitor started
+        mock_trade_monitor.monitor_trade.assert_called_once_with(
+            "MOCK_DEAL_ID",
+            epic,
+            entry_price=7501.0,  # Adjusted Entry
+            stop_loss=7451.0,  # Adjusted Stop
+            atr=10.0,
+            use_trailing_stop=True,
+        )
+
+        # 6. Simulate Trade Closure via Stream Update
+        # Mock IG Client fetch_transaction_history_by_deal_id for PnL
+        mock_history_df = pd.DataFrame(
+            [
+                {
+                    "dealReference": "REF",
+                    "profitAndLoss": "£50.00",
+                    "openLevel": 7500.0,
+                    "closeLevel": 7600.0,
+                }
+            ]
+        )
+        mock_ig_client.fetch_transaction_history_by_deal_id.return_value = (
+            mock_history_df
+        )
+
+        # Manually trigger the closure callback on monitor
+        # We need to construct the payload as the monitor expects
+        close_payload = json.dumps(
+            {
+                "dealId": "MOCK_DEAL_ID",
+                "status": "CLOSED",
+                "level": 7600.0,
+                "profitAndLoss": 50.0,
+            }
+        )
+
+        # Wait briefly for monitor to be running and subscribed
+        real_sleep(0.2)
+
+        # Trigger callback
+        mock_trade_monitor._handle_trade_update(
+            {"type": "trade_update", "payload": close_payload}
+        )
+
+        # Allow monitor to poll and detect closure
+        # Join should finish quickly now due to fast sleep
+        trade_execution_thread.join(timeout=5.0)  # Wait for the thread to finish
+        assert not trade_execution_thread.is_alive()
 
     # Verify trade logger called for placement (AFTER monitoring finishes)
     # 1. PENDING log (during generation)

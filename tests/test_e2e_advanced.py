@@ -1,10 +1,8 @@
 import pytest
-from unittest.mock import patch, MagicMock
-import pandas as pd
+from unittest.mock import MagicMock
 import os
 import tempfile
 import logging
-from datetime import datetime
 import time
 
 from src.strategy_engine import StrategyEngine, Action, TradingSignal, EntryType
@@ -62,134 +60,6 @@ def advanced_mocks(temp_db_path):
         mock_trade_monitor,
         temp_db_path,
     )
-
-
-def test_e2e_confirmation_entry(advanced_mocks, caplog):
-    caplog.set_level(logging.DEBUG)
-    (
-        mock_ig_client,
-        mock_gemini_analyst,
-        mock_stream_manager,
-        mock_market_status,
-        mock_news_fetcher,
-        mock_trade_logger,
-        mock_trade_monitor,
-        db_path,
-    ) = advanced_mocks
-
-    epic = "IX.D.FTSE.DAILY.IP"
-    entry_price = 7500.0
-
-    # 1. Setup: CONFIRMATION Entry
-    mock_gemini_analyst.analyze_market.return_value = TradingSignal(
-        ticker=epic,
-        action=Action.BUY,
-        entry=entry_price,
-        stop_loss=7450.0,
-        take_profit=7600.0,
-        confidence="high",
-        reasoning="Test Confirmation",
-        size=1.0,
-        atr=10.0,
-        entry_type=EntryType.CONFIRMATION,
-        use_trailing_stop=True,
-    )
-
-    engine = StrategyEngine(
-        epic,
-        strategy_name="TEST_CONFIRM",
-        ig_client=mock_ig_client,
-        analyst=mock_gemini_analyst,
-        news_fetcher=mock_news_fetcher,
-        trade_logger=mock_trade_logger,
-        trade_monitor=mock_trade_monitor,
-        market_status=mock_market_status,
-        stream_manager=mock_stream_manager,
-        dry_run=False,
-    )
-    # Ensure logger debug
-    logging.getLogger("src.strategy_engine").setLevel(logging.DEBUG)
-
-    engine.generate_plan()
-    assert engine.active_plan is not None, "Plan generation failed!"
-
-    from threading import Thread
-
-    trade_execution_thread = Thread(
-        target=engine.execute_strategy, kwargs={"timeout_seconds": 4.0}, daemon=True
-    )
-    trade_execution_thread.start()
-    time.sleep(0.1)
-
-    # Initialize prices (so loop doesn't skip)
-    engine.current_bid = 7490.0
-    engine.current_offer = 7491.0
-
-    # 3. Simulate Price Ticks crossing entry (Should be IGNORED for Confirmation)
-    mock_stream_manager.simulate_price_tick(epic, entry_price + 5, entry_price + 6)
-    time.sleep(0.5)
-
-    # Verify NO trade placed yet
-    mock_ig_client.place_spread_bet_order.assert_not_called()
-
-    # Stop the first thread to avoid double triggers
-    engine.position_open = True
-    trade_execution_thread.join(timeout=1.0)
-    engine.position_open = False  # Reset for next run
-
-    # 4. Simulate 1-Min Candle Close > Entry
-    # We patch datetime to control the "current time" and simulate a minute change.
-    with patch("src.strategy_engine.datetime") as mock_datetime:
-        # Start at minute 0
-        mock_datetime.now.return_value = datetime(2025, 1, 1, 8, 0, 0)
-
-        # Start Execution (restart thread with patched datetime)
-        trade_execution_thread = Thread(
-            target=engine.execute_strategy, kwargs={"timeout_seconds": 4.0}, daemon=True
-        )
-        trade_execution_thread.start()
-        time.sleep(0.1)
-
-        # Initialize prices
-        engine.current_bid = 7490.0
-        engine.current_offer = 7491.0
-
-        # Ticks cross entry (7500) -> Should be ignored
-        mock_stream_manager.simulate_price_tick(epic, entry_price + 5, entry_price + 6)
-        time.sleep(0.2)
-        mock_ig_client.place_spread_bet_order.assert_not_called()
-
-        # Mock "Closed Candle" data > Entry
-        closed_candle_df = pd.DataFrame(
-            {
-                "open": [entry_price, entry_price],
-                "high": [entry_price + 10, entry_price + 10],
-                "low": [entry_price - 2, entry_price - 2],
-                "close": [entry_price + 5, entry_price + 5],  # Close > Entry
-                "volume": [1000, 1000],
-            }
-        )
-        mock_ig_client.fetch_historical_data.return_value = closed_candle_df
-
-        # Advance time to minute 1 -> Triggers check
-        mock_datetime.now.return_value = datetime(2025, 1, 1, 8, 1, 5)
-        time.sleep(0.5)  # Allow loop to cycle and check
-
-        # Verify Trade Placed
-        mock_ig_client.place_spread_bet_order.assert_called_once()
-
-        # Cleanup
-        # Simulate closure to exit monitor
-        mock_stream_manager.simulate_trade_update(
-            {
-                "dealId": "MOCK_DEAL_ID",
-                "status": "CLOSED",
-                "level": 7505.0,
-                "profitAndLoss": 50.0,
-            }
-        )
-
-        trade_execution_thread.join(timeout=1.0)
 
 
 def test_e2e_trailing_stop(advanced_mocks, caplog):
@@ -279,13 +149,13 @@ def test_e2e_trailing_stop(advanced_mocks, caplog):
         "stopLevel": 7450,
     }
 
-    # Move 2: Profit = 1.5R (75 pts). Price = 7575.
-    # NEW LOGIC: Breakeven triggers (7500). Trailing triggers (2.0 ATR = 20 pts -> 7555).
+    # Move 2: Profit = 1.5R (75 pts). Price = 7580.
+    # NEW LOGIC: Breakeven triggers (7501). Trailing triggers (2.0 ATR = 20 pts -> 7560).
     move_2_pos = {
         "dealId": "MOCK_DEAL_ID",
         "direction": "BUY",
-        "bid": 7575,
-        "offer": 7576,
+        "bid": 7580,
+        "offer": 7581,
         "stopLevel": 7450,
     }
 
@@ -300,7 +170,13 @@ def test_e2e_trailing_stop(advanced_mocks, caplog):
         move_2_pos,
         move_2_pos,
         move_2_pos,
-        move_2_pos,  # Keep returning active
+        move_2_pos,
+        move_2_pos,
+        move_2_pos,
+        move_2_pos,
+        move_2_pos,
+        move_2_pos,
+        move_2_pos,
         move_2_pos,
     ]
 
@@ -326,11 +202,11 @@ def test_e2e_trailing_stop(advanced_mocks, caplog):
 
     # First update: Breakeven
     args1 = mock_ig_client.update_open_position.call_args_list[0]
-    assert args1[1]["stop_level"] == 7500.0  # Entry Price
+    assert args1[1]["stop_level"] == 7501.0  # Entry Price (Adjusted)
 
-    # Second update: Trailing (ATR 10 * 2 = 20. Price 7575 - 20 = 7555)
+    # Second update: Trailing (ATR 10 * 2 = 20. Price 7580 - 20 = 7560)
     args2 = mock_ig_client.update_open_position.call_args_list[1]
-    assert args2[1]["stop_level"] == 7555.0  # 7575 - 20
+    assert args2[1]["stop_level"] == 7560.0  # 7580 - 20
 
 
 def test_e2e_no_trailing_stop(advanced_mocks, caplog):

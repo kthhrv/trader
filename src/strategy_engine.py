@@ -2,7 +2,6 @@ import logging
 import time
 import threading
 from typing import Optional
-from datetime import datetime
 import pandas as pd
 import pandas_ta as ta
 from config import RISK_PER_TRADE_PERCENT
@@ -54,7 +53,7 @@ class StrategyEngine:
         self.trade_logger = trade_logger if trade_logger else TradeLoggerDB()
         self.stream_manager = (
             stream_manager if stream_manager else StreamManager(self.client)
-        )  # Initialize first
+        )
         self.trade_monitor = (
             trade_monitor
             if trade_monitor
@@ -66,6 +65,7 @@ class StrategyEngine:
         self.vix_epic = "CC.D.VIX.USS.IP"
 
         self.active_plan: Optional[TradingSignal] = None
+        self.active_plan_id: Optional[int] = None
         self.position_open = False
         self.current_bid: float = 0.0
         self.current_offer: float = 0.0
@@ -101,25 +101,19 @@ class StrategyEngine:
                 return
 
             # 2. Calculate Technical Indicators
-            # Ensure columns are numeric (handle missing volume gracefully)
             cols = ["open", "high", "low", "close", "volume"]
             existing_cols = [c for c in cols if c in df.columns]
             df[existing_cols] = df[existing_cols].apply(pd.to_numeric, errors="coerce")
 
             # Calculate Indicators
-            # ATR(14) - Volatility
             df["ATR"] = ta.atr(df["high"], df["low"], df["close"], length=14)
-            # RSI(14) - Momentum
             df["RSI"] = ta.rsi(df["close"], length=14)
-            # EMA(20) - Trend
             df["EMA_20"] = ta.ema(df["close"], length=20)
 
-            # Get the latest complete candle
             latest = df.iloc[-1]
             prev_close = df.iloc[-2]["close"]
 
-            # --- Volatility Context (New) ---
-            # Calculate average ATR of the loaded period (approx 50 candles)
+            # --- Volatility Context ---
             avg_atr = df["ATR"].mean()
             current_atr = latest["ATR"]
             vol_ratio = current_atr / avg_atr if avg_atr > 0 else 1.0
@@ -130,10 +124,8 @@ class StrategyEngine:
             elif vol_ratio > 1.2:
                 vol_state = "HIGH (Caution: Expect wider swings)"
 
-            # Calculate Gap (Current Price vs Yesterday's Close)
-            yesterday_close = prev_close  # Default fallback to previous 15m close
+            yesterday_close = prev_close
             if not df_daily.empty and len(df_daily) >= 2:
-                # Assuming last row is 'Today' (forming) and second to last is 'Yesterday' (Confirmed)
                 yesterday_close = df_daily.iloc[-2]["close"]
 
             gap_percent = ((latest["close"] - yesterday_close) / yesterday_close) * 100
@@ -172,7 +164,7 @@ class StrategyEngine:
             except Exception as e:
                 logger.warning(f"Failed to fetch VIX data: {e}")
 
-            # 4. Fetch and Append News
+            # 4. Fetch News
             query = (
                 self.news_query if self.news_query else self._get_news_query(self.epic)
             )
@@ -184,7 +176,6 @@ class StrategyEngine:
                 market_context, strategy_name=self.strategy_name
             )
 
-            # Fetch current spread for logging context
             current_spread = 0.0
             try:
                 market_info = self.client.get_market_info(self.epic)
@@ -200,13 +191,9 @@ class StrategyEngine:
                 pass
 
             if signal:
-                # Ensure the ATR from analysis is correctly populated in the signal for later checks
-                if (
-                    signal.atr is None
-                ):  # If Gemini doesn't provide it, use our calculated one
+                if signal.atr is None:
                     signal.atr = latest["ATR"]
 
-                # --- Hardcoded Safety Checks ---
                 if signal.action != Action.WAIT:
                     if not self._validate_plan(signal):
                         logger.warning(
@@ -231,7 +218,6 @@ class StrategyEngine:
                         f"PLAN GENERATED: {signal.action} {signal.size} at {signal.entry} (Stop: {signal.stop_loss}, TP: {signal.take_profit}) Conf: {signal.confidence} Type: {signal.entry_type.value}"
                     )
 
-                    # Log as PENDING immediately
                     self.active_plan_id = self.trade_logger.log_trade(
                         epic=self.epic,
                         plan=signal,
@@ -246,10 +232,8 @@ class StrategyEngine:
                     logger.info(
                         "PLAN RESULT: Gemini advised WAIT. Proceeding to monitor mode for data collection."
                     )
-                    self.active_plan = (
-                        signal  # KEEP plan active to trigger stream recording
-                    )
-                    self.trade_logger.log_trade(
+                    self.active_plan = signal
+                    self.active_plan_id = self.trade_logger.log_trade(
                         epic=self.epic,
                         plan=signal,
                         outcome="WAIT",
@@ -259,11 +243,9 @@ class StrategyEngine:
                         if signal.entry_type
                         else "UNKNOWN",
                     )
-                    # self.active_plan = None # Removed to allow execution loop
                 logger.info(f"reasoning: {signal.reasoning}")
             else:
                 logger.warning("PLAN RESULT: Gemini signal generation failed.")
-                # Log AI error as a "WAIT" with error reasoning for tracking
                 error_signal = TradingSignal(
                     ticker=self.epic,
                     action=Action.WAIT,
@@ -275,6 +257,7 @@ class StrategyEngine:
                     size=0.0,
                     atr=0.0,
                     entry_type=EntryType.INSTANT,
+                    use_trailing_stop=False,
                 )
                 self.trade_logger.log_trade(
                     epic=self.epic,
@@ -291,10 +274,8 @@ class StrategyEngine:
     def _validate_plan(self, plan: TradingSignal) -> bool:
         """
         Performs hardcoded sanity checks on the generated plan.
-        Returns True if valid, False if rejected.
         """
         try:
-            # 1. Entry vs Stop Logic
             if plan.action == Action.BUY:
                 if plan.entry <= plan.stop_loss:
                     logger.warning(
@@ -310,7 +291,6 @@ class StrategyEngine:
 
             risk_dist = abs(plan.entry - plan.stop_loss)
 
-            # 2. Risk/Reward Ratio (only if TP is set)
             if plan.take_profit:
                 reward_dist = abs(plan.take_profit - plan.entry)
                 if risk_dist > 0:
@@ -321,9 +301,7 @@ class StrategyEngine:
                         )
                         return False
 
-            # 3. Stop Tightness vs ATR
             if plan.atr and plan.atr > 0:
-                # Min Stop Distance (0.5 * ATR)
                 min_stop = 0.5 * plan.atr
                 if risk_dist < min_stop:
                     logger.warning(
@@ -331,7 +309,6 @@ class StrategyEngine:
                     )
                     return False
 
-                # Max Stop Distance (5.0 * ATR) - Prevent "wide" stops
                 max_stop = 5.0 * plan.atr
                 if risk_dist > max_stop:
                     logger.warning(
@@ -346,9 +323,6 @@ class StrategyEngine:
             return False
 
     def _get_news_query(self, epic: str) -> str:
-        """
-        Maps an IG epic to a search query for Google News.
-        """
         if "FTSE" in epic:
             return "FTSE 100 UK Economy"
         elif "SPX" in epic or "US500" in epic:
@@ -360,15 +334,15 @@ class StrategyEngine:
         elif "DAX" in epic or "DE30" in epic:
             return "DAX 40 Germany Economy"
         else:
-            # Fallback: try to make a generic query from the epic parts
             parts = epic.split(".")
             if len(parts) > 2:
                 return f"{parts[2]} Market News"
             return "Global Financial Markets"
 
-    def execute_strategy(self, timeout_seconds: int = 5400):  # Default to 90 minutes
+    def execute_strategy(self, timeout_seconds: int = 5400):
         """
-        Step 2: Uses the streaming API to monitor prices and triggers Market Order when level is hit.
+        Step 2: Monitoring loop. Triggers immediate entry on touch.
+        Adjusts Stop Loss dynamically to maintain planned risk distance if slippage occurs.
         """
         if not self.active_plan:
             logger.info("SKIPPED: No active plan to execute.")
@@ -380,31 +354,28 @@ class StrategyEngine:
 
         start_time = time.time()
         last_log_time = start_time
-        last_checked_minute = -1
         plan = self.active_plan
+        decision_made = False  # Track if we've attempted a trade or rejected one
 
         try:
-            # 1. Connect to stream and subscribe to epic
-            # The StreamManager handles its own connection/reconnection
             self.stream_manager.connect_and_subscribe(
                 self.epic, self._stream_price_update_handler
             )
 
-            # Keep main thread alive until trade execution, interrupt, or timeout
-            while not self.position_open:
+            while not self.position_open and not decision_made:
                 if (time.time() - start_time) > timeout_seconds:
                     logger.info(
                         f"Strategy for {self.epic} timed out after {timeout_seconds}s. No trade executed."
                     )
-
-                    if self.active_plan_id:
+                    if self.active_plan_id and not self.position_open:
+                        # Only update to TIMED_OUT if we haven't already made a decision (like REJECTED_CHASE)
                         self.trade_logger.update_trade_status(
                             row_id=self.active_plan_id,
                             outcome="TIMED_OUT",
                             deal_id=None,
                         )
-                    else:
-                        # Log the timeout event to DB (Fallback)
+                    elif not self.active_plan_id:
+                        # Fallback: Log the timeout event to DB if no initial PENDING log exists
                         self.trade_logger.log_trade(
                             epic=self.epic,
                             plan=self.active_plan,
@@ -416,14 +387,11 @@ class StrategyEngine:
                             if self.active_plan.entry_type
                             else "UNKNOWN",
                         )
+                    decision_made = True
+                    break
 
-                    break  # Exit loop on timeout
-
-                # Sleep for a short duration to prevent busy-spinning and reduce CPU usage.
-                # The stream handler will update prices in the background.
                 time.sleep(0.1)
 
-                # Thread-safe read of prices
                 with self.price_lock:
                     bid_snapshot = self.current_bid
                     offer_snapshot = self.current_offer
@@ -431,131 +399,79 @@ class StrategyEngine:
                 if bid_snapshot == 0 or offer_snapshot == 0:
                     continue
 
-                # Log status every 10 seconds to show it's alive
+                # Periodic Logging
                 current_time = time.time()
                 if current_time - last_log_time > 10:
                     wait_msg = ""
                     if plan.action == Action.WAIT:
                         wait_msg = "Monitoring Mode (WAIT): Recording data only."
-                    elif plan.entry_type == EntryType.INSTANT:
+                    else:
                         if plan.action == Action.BUY:
-                            wait_msg = f"Waiting for BUY trigger (INSTANT): Offer {offer_snapshot} >= {plan.entry}"
+                            wait_msg = f"Waiting for BUY trigger: Offer {offer_snapshot} >= {plan.entry}"
                         elif plan.action == Action.SELL:
-                            wait_msg = f"Waiting for SELL trigger (INSTANT): Bid {bid_snapshot} <= {plan.entry}"
-                    elif plan.entry_type == EntryType.CONFIRMATION:
-                        if plan.action == Action.BUY:
-                            wait_msg = f"Waiting for BUY trigger (CONFIRMATION): Candle Close > {plan.entry}"
-                        elif plan.action == Action.SELL:
-                            wait_msg = f"Waiting for SELL trigger (CONFIRMATION): Candle Close < {plan.entry}"
+                            wait_msg = f"Waiting for SELL trigger: Bid {bid_snapshot} <= {plan.entry}"
 
                     logger.info(
                         f"MONITORING ({self.epic}): {wait_msg} | Current Bid/Offer: {bid_snapshot}/{offer_snapshot}"
                     )
                     last_log_time = current_time
 
-                # --- Spread and Trigger Logic ---
+                # Spread Check
                 current_spread = round(abs(offer_snapshot - bid_snapshot), 2)
-
-                # If Action is WAIT, we just loop until timeout (recording data via stream manager)
                 if plan.action == Action.WAIT:
                     continue
 
-                triggered = False
-
                 if current_spread > self.max_spread:
-                    current_time = time.time()
-                    if (
-                        current_time - self.last_skipped_log_time > 5
-                    ):  # Log at most every 5 seconds
+                    if current_time - self.last_skipped_log_time > 5:
                         logger.info(
-                            f"SKIPPED: Spread ({current_spread}) is wider than max allowed ({self.max_spread}). Holding off trigger for {self.epic}."
+                            f"SKIPPED: Spread ({current_spread}) is wider than max allowed ({self.max_spread}). Holding off trigger."
                         )
                         self.last_skipped_log_time = current_time
-                    continue  # Skip to next iteration, don't check price trigger
+                    continue
 
-                if plan.entry_type == EntryType.INSTANT:
-                    # Logic 1: INSTANT (Touch Entry)
-                    if plan.action == Action.BUY:
-                        if offer_snapshot >= plan.entry:
-                            triggered = True
-                            logger.info(
-                                f"BUY TRIGGERED (INSTANT): Offer {offer_snapshot} >= Entry {plan.entry} (Spread: {current_spread})"
-                            )
+                # Trigger Logic (Touch Entry)
+                triggered = False
+                trigger_price = 0.0
 
-                    elif plan.action == Action.SELL:
-                        if bid_snapshot <= plan.entry:
-                            triggered = True
-                            logger.info(
-                                f"SELL TRIGGERED (INSTANT): Bid {bid_snapshot} <= Entry {plan.entry} (Spread: {current_spread})"
-                            )
-
-                elif plan.entry_type == EntryType.CONFIRMATION:
-                    # Logic 2: CONFIRMATION (Candle Close)
-                    current_dt = datetime.now()
-                    if current_dt.minute != last_checked_minute:
-                        # Update immediately to prevent infinite retry loops if API fails
-                        last_checked_minute = current_dt.minute
-
-                        # Only check once per minute to avoid API spam, slightly after the minute mark ideally
-                        # Fetch last 1-minute candle
-                        try:
-                            # Fetch 2 points to ensure we get the latest completed one
-                            df_1m = self.client.fetch_historical_data(
-                                self.epic, "1Min", 2
-                            )
-                            if not df_1m.empty:
-                                # IG often returns the *current open* candle as the last row.
-                                # The second to last row is the fully closed candle.
-                                # Or check timestamps.
-                                # For safety, let's look at the latest candle and see if its close breaches.
-                                # If it's a "closed" candle, we use it. If it's live, we use it (proxy for "closing").
-                                # Standard approach: Wait for candle to *complete*.
-                                # Let's assume the last row is the current forming candle.
-                                # So we look at df_1m.iloc[-2] if len >= 2
-                                if len(df_1m) >= 2:
-                                    last_closed_candle = df_1m.iloc[-2]
-                                    close_price = last_closed_candle["close"]
-
-                                    if (
-                                        plan.action == Action.BUY
-                                        and close_price > plan.entry
-                                    ):
-                                        triggered = True
-                                        logger.info(
-                                            f"BUY TRIGGERED (CONFIRMATION): 1m Close {close_price} > Entry {plan.entry}"
-                                        )
-                                    elif (
-                                        plan.action == Action.SELL
-                                        and close_price < plan.entry
-                                    ):
-                                        triggered = True
-                                        logger.info(
-                                            f"SELL TRIGGERED (CONFIRMATION): 1m Close {close_price} < Entry {plan.entry}"
-                                        )
-                                    else:
-                                        logger.info(
-                                            f"Checked CONFIRMATION ({current_dt.strftime('%H:%M')}): Close {close_price} did not trigger {plan.action} (Target: {plan.entry})"
-                                        )
-
-                        except Exception as e:
-                            logger.error(
-                                f"Error fetching 1m data for confirmation: {e}"
-                            )
+                if plan.action == Action.BUY:
+                    if offer_snapshot >= plan.entry:
+                        triggered = True
+                        trigger_price = offer_snapshot
+                elif plan.action == Action.SELL:
+                    if bid_snapshot <= plan.entry:
+                        triggered = True
+                        trigger_price = bid_snapshot
 
                 if triggered:
+                    # --- Maintain Structural Risk Distance ---
+                    # Calculate original planned risk distance (points)
+                    original_risk = abs(plan.entry - plan.stop_loss)
+
+                    if abs(trigger_price - plan.entry) > 0.1:  # Significant deviation
+                        logger.info(
+                            f"Trigger Price ({trigger_price}) deviates from Target ({plan.entry}). "
+                            f"Adjusting Stop Loss to maintain {original_risk:.2f} risk distance."
+                        )
+
+                        # Update plan with the price reality at the moment of trigger
+                        plan.entry = trigger_price
+                        if plan.action == Action.BUY:
+                            plan.stop_loss = trigger_price - original_risk
+                        else:
+                            plan.stop_loss = trigger_price + original_risk
+
+                    # Proceed to execution
                     success = self._place_market_order(
                         plan, current_spread, dry_run=self.dry_run
                     )
                     if not success:
-                        logger.info(
-                            "Trade attempt failed or was skipped. Halting further attempts for this plan."
+                        logger.warning(
+                            "Trade execution failed or was rejected internally."
                         )
-                    # Whether successful or not, we break after one attempt.
-                    break  # Exit the monitoring loop
+                    decision_made = True
+                    break
 
-            # --- Post-Trade / Post-Trigger Data Recording ---
-            # If the trade finished (SL/TP) or was skipped, but we still have time left in the session,
-            # continue running to record market data for the full window.
+            # --- Post-Decision Data Recording ---
             elapsed = time.time() - start_time
             remaining = timeout_seconds - elapsed
 
@@ -564,7 +480,7 @@ class StrategyEngine:
                     f"Session active. Continuing to record market data for {remaining:.0f}s until timeout..."
                 )
                 while time.time() - start_time < timeout_seconds:
-                    time.sleep(5)  # Sleep while StreamManager records in background
+                    time.sleep(5)
                 logger.info("Session timeout reached.")
 
         except KeyboardInterrupt:
@@ -572,13 +488,10 @@ class StrategyEngine:
         except Exception as e:
             logger.error(f"Execution error: {e}")
         finally:
-            self.stream_manager.stop()  # Ensure stream is stopped
+            self.stream_manager.stop()
             logger.info("Execution monitor stopped.")
 
     def _stream_price_update_handler(self, data: dict):
-        """
-        Callback function to receive price updates from the stream.
-        """
         epic = data.get("epic")
         bid = data.get("bid", 0.0)
         offer = data.get("offer", 0.0)
@@ -589,15 +502,10 @@ class StrategyEngine:
                 self.current_offer = offer
 
     def _calculate_size(self, entry: float, stop_loss: float) -> float:
-        """
-        Calculates position size based on account risk.
-        Formula: Size = (Account Balance * Risk %) / Stop Distance
-        """
         try:
             all_accounts = self.client.get_account_info()
             balance = 0.0
 
-            # Ensure we're looking at the correctly authenticated account
             if self.client.service.account_id and isinstance(
                 all_accounts, pd.DataFrame
             ):
@@ -605,65 +513,37 @@ class StrategyEngine:
                     all_accounts["accountId"] == self.client.service.account_id
                 ]
                 if not target_account_df.empty:
-                    # Prioritize 'available' funds for trading
                     if "available" in target_account_df.columns:
                         balance = float(target_account_df.iloc[0]["available"])
                     elif "balance" in target_account_df.columns:
-                        # Fallback to general balance if 'available' isn't there or if it's nested (though inspect showed it's top-level)
                         val = target_account_df.iloc[0]["balance"]
-                        if isinstance(val, dict):
-                            balance = float(val.get("available", 0))
-                        else:
-                            balance = float(val)
+                        balance = (
+                            float(val.get("available", 0))
+                            if isinstance(val, dict)
+                            else float(val)
+                        )
                 else:
-                    logger.warning(
-                        f"Authenticated account ID {self.client.service.account_id} not found in fetched accounts. Defaulting to minimum size."
-                    )
                     return 0.5
             elif isinstance(all_accounts, dict) and "accounts" in all_accounts:
-                # Handle raw dictionary response if it's not converted to DataFrame by client
                 for acc in all_accounts["accounts"]:
                     if acc.get("accountId") == self.client.service.account_id:
-                        if "available" in acc:
-                            balance = float(acc["available"])
-                        elif "balance" in acc and isinstance(acc["balance"], dict):
-                            balance = float(acc["balance"].get("available", 0))
-                        else:
-                            balance = float(acc.get("balance", 0))
+                        balance = float(
+                            acc.get("available")
+                            or acc.get("balance", {}).get("available", 0)
+                        )
                         break
-                if balance == 0:
-                    logger.warning(
-                        f"Authenticated account ID {self.client.service.account_id} not found in fetched accounts dict. Defaulting to minimum size."
-                    )
-                    return 0.5
-            else:
-                logger.warning(
-                    f"Unknown accounts response type or no account ID set in client. Defaulting to minimum size. Type: {type(all_accounts)}"
-                )
-                return 0.5
 
-            if balance <= 0:  # Sanity check for negative or zero balance
-                logger.warning(
-                    f"Calculated balance is {balance}. Cannot calculate trade size. Defaulting to minimum size."
-                )
+            if balance <= 0:
                 return 0.5
 
             risk_amount = balance * RISK_PER_TRADE_PERCENT
             stop_distance = abs(entry - stop_loss)
 
             if stop_distance <= 0:
-                logger.error("Invalid stop distance (0 or negative).")
                 return 0.5
 
-            calculated_size = risk_amount / stop_distance
-
-            # Round to 2 decimal places
-            calculated_size = round(calculated_size, 2)
-
-            logger.info(
-                f"Dynamic Sizing: Balance={balance}, Risk={RISK_PER_TRADE_PERCENT * 100}%, Risk Amount={risk_amount}, Stop Dist={stop_distance}, Size={calculated_size}"
-            )
-
+            calculated_size = round(risk_amount / stop_distance, 2)
+            logger.info(f"Dynamic Sizing: Balance={balance}, Size={calculated_size}")
             return calculated_size
 
         except Exception as e:
@@ -671,74 +551,34 @@ class StrategyEngine:
             return 0.5
 
     def _place_market_order(
-        self, plan: TradingSignal, current_spread: float, dry_run: bool
+        self,
+        plan: TradingSignal,
+        current_spread: float,
+        dry_run: bool,
     ) -> bool:
-        """
-        Executes the trade via IG Client as a Market Order (Spread Bet),
-        or simulates it if dry_run is True.
-        Returns True if order placed/simulated, False if skipped/failed.
-        """
         try:
             logger.info("Placing MARKET order...")
             direction = "BUY" if plan.action == Action.BUY else "SELL"
-            deal_id = None  # Initialize deal_id
+            deal_id = None
+            execution_price = plan.entry
 
             if plan.stop_loss is None:
-                logger.warning(
-                    "Mandatory stop_loss is missing from the plan. Cannot place order."
-                )
                 return False
 
-            # --- Stop vs. ATR Check ---
-            if plan.atr and plan.atr > 0:
-                stop_distance = abs(plan.entry - plan.stop_loss)
-                stop_to_atr_ratio = round(stop_distance / plan.atr, 2)
-
-                if stop_to_atr_ratio < 1.0:
-                    logger.warning(
-                        f"Stop Loss for {self.epic} is tight ({stop_to_atr_ratio}x ATR). Consider wider stop (Entry: {plan.entry}, Stop: {plan.stop_loss}, ATR: {plan.atr})."
-                    )
-            else:
-                logger.warning("ATR not available in plan for stop tightness check.")
-            # --- End Stop vs. ATR Check ---
-
-            # --- Sizing Logic ---
             if self.strategy_name == "TEST_TRADE":
-                # For manual test trades, use the fixed size from the plan (e.g. 0.5)
-                # This ensures consistency and ignores account balance fluctuations.
                 size = plan.size
-                logger.info(f"TEST_TRADE: Using fixed size from plan: {size}")
             else:
-                # Dynamic Sizing for Strategy Execution
                 size = self._calculate_size(plan.entry, plan.stop_loss)
-                # Ensure min size (safeguard, though IG API will reject if too small, usually 0.5 or 0.04)
-                if size < 0.04:
-                    logger.warning(
-                        f"Calculated size {size} is below minimum (0.04). Setting to 0.04."
-                    )
-                    size = 0.04
-                # Log the final calculated size
-                logger.info(f"Final calculated trade size for {self.epic}: {size}")
-            # --- End Sizing Logic ---
+                size = max(size, 0.04)
 
-            # --- Take Profit Override for Trailing Stop ---
             take_profit_level = plan.take_profit
             if plan.use_trailing_stop:
-                logger.info(
-                    "Using Trailing Stop strategy. Overriding Take Profit to None for uncapped upside."
-                )
                 take_profit_level = None
 
-            execution_price = plan.entry  # Default to planned entry
-
             if dry_run:
-                logger.info(
-                    f"DRY RUN: Order would have been PLACED for {direction} {size} {self.epic} at entry {plan.entry} (Stop: {plan.stop_loss}, TP: {take_profit_level}). Spread: {current_spread}."
-                )
+                logger.info(f"DRY RUN: {direction} {size} {self.epic} at {plan.entry}")
                 outcome = "DRY_RUN_PLACED"
             else:
-                logger.info("Placing LIVE MARKET order...")
-                # confirmation is now returned (dict with dealId, dealStatus, etc.)
                 confirmation = self.client.place_spread_bet_order(
                     epic=self.epic,
                     direction=direction,
@@ -747,29 +587,16 @@ class StrategyEngine:
                     stop_level=plan.stop_loss,
                     limit_level=take_profit_level,
                 )
-                logger.info("LIVE Market Order successfully placed.")
                 outcome = "LIVE_PLACED"
-
                 if confirmation and "dealId" in confirmation:
                     deal_id = confirmation["dealId"]
-                    # Capture actual fill price
-                    if "level" in confirmation and confirmation["level"]:
-                        try:
-                            execution_price = float(confirmation["level"])
-                            logger.info(
-                                f"Order filled at actual level: {execution_price} (Planned: {plan.entry})"
-                            )
-                        except ValueError:
-                            logger.warning(
-                                f"Could not parse fill level from confirmation: {confirmation['level']}"
-                            )
-                else:
-                    logger.warning("Could not extract dealId from confirmation.")
+                    if confirmation.get("level"):
+                        execution_price = float(confirmation["level"])
+                        logger.info(f"Order filled at {execution_price}")
 
-            self.position_open = True  # Set to True even in dry run to stop polling
+            self.position_open = True
 
             if self.active_plan_id:
-                # Update existing PENDING record
                 self.trade_logger.update_trade_status(
                     row_id=self.active_plan_id,
                     outcome=outcome,
@@ -777,21 +604,8 @@ class StrategyEngine:
                     size=size,
                     entry=execution_price,
                 )
-            else:
-                # Fallback: Log fresh if no pending ID (e.g. Test Trade)
-                self.trade_logger.log_trade(
-                    epic=self.epic,
-                    plan=plan,
-                    outcome=outcome,
-                    spread_at_entry=current_spread,
-                    is_dry_run=dry_run,
-                    deal_id=deal_id,
-                    entry_type=plan.entry_type.value if plan.entry_type else "UNKNOWN",
-                )
 
-            # Start Monitoring (Update upon close) - Blocking call
             if not dry_run and deal_id:
-                logger.info(f"Starting to monitor trade {deal_id}...")
                 self.trade_monitor.monitor_trade(
                     deal_id,
                     self.epic,
