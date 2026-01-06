@@ -18,6 +18,7 @@ from src.database import (
     sync_active_trade,
     update_trade_outcome,
     fetch_trades_in_range,
+    delete_trade_log,
 )
 from src.gemini_analyst import (
     GeminiAnalyst,
@@ -31,7 +32,12 @@ from src.stream_manager import StreamManager
 from src.scorecard import generate_scorecard
 from src.opportunity_analyzer import OpportunityAnalyzer
 
+import os
+
 warnings.simplefilter(action="ignore", category=FutureWarning)
+
+# Ensure logs directory exists
+os.makedirs("logs", exist_ok=True)
 
 # Configure Logging
 logging.basicConfig(
@@ -585,6 +591,28 @@ def run_post_mortem(deal_id: str):
     print("=" * 40 + "\n")
 
 
+def run_delete_trade(identifier: str):
+    """
+    Deletes a trade log from the database.
+    Supports "DB:<ID>" for primary keys or straight Deal IDs.
+    """
+    is_db_id = False
+    clean_id = identifier
+
+    if identifier.startswith("DB:"):
+        is_db_id = True
+        clean_id = identifier.replace("DB:", "")
+        logger.info(f"Deleting trade log with DB ID: {clean_id}")
+    else:
+        logger.info(f"Deleting trade log with Deal ID: {identifier}")
+
+    success = delete_trade_log(clean_id, is_db_id=is_db_id)
+    if success:
+        print(f"Successfully deleted trade: {identifier}")
+    else:
+        print(f"Failed to delete trade: {identifier} (Not found or error)")
+
+
 def run_recent_trades(limit: int):
     """
     Fetches and prints recent trade logs.
@@ -639,7 +667,8 @@ def run_recent_trades(limit: int):
                 color = "\033[91m"  # Red
             reset = "\033[0m"
 
-        print(f"Deal ID:    {trade['deal_id']}")
+        deal_display = trade["deal_id"] if trade.get("deal_id") else f"DB:{trade['id']}"
+        print(f"ID:         {deal_display}")
         print(f"Time:       {entry_time_str} -> {exit_time_str or 'Active'}")
         print(f"Epic:       {trade['epic']} ({trade['action']})")
         print(f"Entry Type: {trade['entry_type']}")
@@ -1148,6 +1177,11 @@ def main():
         type=str,
         help="Manually sync a trade's outcome (PnL, Exit Price) from IG History to DB. Usage: --sync-trade <deal_id>",
     )
+    parser.add_argument(
+        "--delete-trade",
+        type=str,
+        help="Delete a trade log entry by Deal ID or DB ID (e.g., DB:123).",
+    )
 
     args = parser.parse_args()
 
@@ -1170,6 +1204,10 @@ def main():
 
     if args.sync_trade:
         run_sync_trade(args.sync_trade)
+        return
+
+    if args.delete_trade:
+        run_delete_trade(args.delete_trade)
         return
 
     if args.test_trade:

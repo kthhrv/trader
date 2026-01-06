@@ -490,6 +490,33 @@ def fetch_candles_range(epic: str, start_time: str, end_time: str, db_path=None)
         conn.close()
 
 
+def delete_trade_log(identifier: str, is_db_id: bool = False, db_path=None):
+    """
+    Deletes a trade log entry by deal_id or primary key id.
+    """
+    conn = get_db_connection(db_path)
+    cursor = conn.cursor()
+    try:
+        if is_db_id:
+            cursor.execute("DELETE FROM trade_log WHERE id = ?", (identifier,))
+            logger.info(f"Deleted trade log with DB ID: {identifier}")
+        else:
+            cursor.execute("DELETE FROM trade_log WHERE deal_id = ?", (identifier,))
+            logger.info(f"Deleted trade log with Deal ID: {identifier}")
+
+        if cursor.rowcount == 0:
+            logger.warning(f"No trade found to delete for identifier: {identifier}")
+            return False
+
+        conn.commit()
+        return True
+    except Exception as e:
+        logger.error(f"Failed to delete trade log: {e}")
+        return False
+    finally:
+        conn.close()
+
+
 if __name__ == "__main__":
     # Configure logging if run directly
     logging.basicConfig(level=logging.INFO)
