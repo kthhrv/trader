@@ -17,6 +17,7 @@ from src.database import (
     fetch_active_trades,
     sync_active_trade,
     update_trade_outcome,
+    fetch_trades_in_range,
 )
 from src.gemini_analyst import (
     GeminiAnalyst,
@@ -1083,6 +1084,11 @@ def main():
         help="Generate a comprehensive performance scorecard from the database.",
     )
     parser.add_argument(
+        "--start-date",
+        type=str,
+        help="Optional start date for --scorecard (YYYY-MM-DD).",
+    )
+    parser.add_argument(
         "--volatility-check",
         action="store_true",
         help="Check current market volatility (Range/ATR) for the selected market/epic.",
@@ -1211,7 +1217,15 @@ def main():
         return
 
     if args.scorecard:
-        generate_scorecard()
+        if args.start_date:
+            # Append time for full day coverage
+            start_iso = f"{args.start_date}T00:00:00"
+            end_iso = datetime.now().isoformat()
+            logger.info(f"Generating scorecard from {start_iso}...")
+            trades = fetch_trades_in_range(start_iso, end_iso)
+            generate_scorecard(trades=trades)
+        else:
+            generate_scorecard()
         return
 
     if args.recent_trades is not None:

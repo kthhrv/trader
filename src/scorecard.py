@@ -128,11 +128,12 @@ def get_scorecard_data(trades=None):
     return stats
 
 
-def generate_scorecard():
+def generate_scorecard(trades=None):
     """
-    Generates and prints a performance scorecard based on all logs in the database.
+    Generates and prints a performance scorecard based on logs.
+    Accepts an optional list of trades.
     """
-    stats = get_scorecard_data()
+    stats = get_scorecard_data(trades=trades)
 
     if not stats:
         print("No data found in trade_log.")
