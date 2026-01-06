@@ -2,11 +2,12 @@ import pandas as pd
 from src.database import fetch_all_trade_logs
 
 
-def get_scorecard_data():
+def get_scorecard_data(trades=None):
     """
     Calculates performance metrics and returns them as a dictionary.
+    Accepts an optional list of trades; otherwise fetches all logs.
     """
-    data = fetch_all_trade_logs()
+    data = trades if trades is not None else fetch_all_trade_logs()
 
     if not data:
         return None

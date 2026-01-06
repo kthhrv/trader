@@ -8,9 +8,10 @@ import plotly.graph_objects as go  # Import Plotly
 # Add parent directory to path to import src
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../")))
 
-from src.database import fetch_recent_trades
+from src.database import fetch_candles_range, fetch_trades_in_range
 from src.market_status import MarketStatus
-from src.ig_client import IGClient
+
+# IGClient removed
 from src.scorecard import get_scorecard_data
 
 
@@ -19,6 +20,10 @@ class State(rx.State):
 
     trades: list[dict] = []
     pnl_history: list[dict] = []
+
+    # Date Filter State
+    start_date: str = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+    end_date: str = datetime.now().strftime("%Y-%m-%d")
 
     # Market Status
     uk_status: str = "Checking..."
@@ -52,10 +57,22 @@ class State(rx.State):
     def toggle_fullscreen(self):
         self.is_fullscreen = not self.is_fullscreen
 
+    def set_start(self, val: str):
+        self.start_date = val
+        self.load_data()
+
+    def set_end(self, val: str):
+        self.end_date = val
+        self.load_data()
+
     def load_data(self):
         """Fetch data from the database and update market status."""
         try:
-            raw_trades = fetch_recent_trades(limit=50)
+            # Use date range
+            start_iso = f"{self.start_date}T00:00:00"
+            end_iso = f"{self.end_date}T23:59:59"
+
+            raw_trades = fetch_trades_in_range(start_iso, end_iso)
 
             # Process trades for Table (Keep original order: newest first)
             processed_trades = []
@@ -85,8 +102,8 @@ class State(rx.State):
                 )
             self.pnl_history = history
 
-            # Load Scorecard Data
-            stats = get_scorecard_data()
+            # Load Scorecard Data (Filtered)
+            stats = get_scorecard_data(trades=raw_trades)
             if stats:
                 self.win_rate = round(stats["win_rate"], 1)
                 self.profit_factor = round(stats["profit_factor"], 2)
@@ -147,74 +164,58 @@ class State(rx.State):
                 )
                 exit_dt = datetime.now()
 
-            # Define Window: Entry - 3h to Exit + 30m to ensure enough data for indicators (20 SMA etc)
+            # Define Window: Entry - 3h to Exit + 30m
             start_dt = entry_dt - timedelta(hours=3)
             end_dt = exit_dt + timedelta(minutes=30)
 
-            # Determine resolution
-            duration = end_dt - start_dt
-            if duration > timedelta(hours=24):
-                resolution = "1H"
-            elif duration > timedelta(hours=4):
-                resolution = "5Min"
-            else:
-                resolution = "5Min"
-
-            # Format for IG API
-            fmt = "%Y-%m-%d %H:%M:%S"
-
-            # Use IGClient
-            client = IGClient()
             epic = trade.get("epic")
 
-            # --- Caching Implementation ---
-            cache_dir = os.path.join(
-                os.path.abspath(os.path.join(os.path.dirname(__file__), "../../")),
-                "data",
-                "cache",
-            )
-            os.makedirs(cache_dir, exist_ok=True)
+            # Determine resolution for resampling
+            duration = end_dt - start_dt
+            if duration > timedelta(days=3):
+                resample_rule = "1H"
+            elif duration > timedelta(hours=24):
+                resample_rule = "5T"
+            else:
+                resample_rule = "1T"  # 1 minute resolution for typical trade view
 
-            # Create a filesystem-safe filename
-            safe_epic = epic.replace(".", "_").replace(":", "")
-            cache_filename = f"{safe_epic}_{resolution}_{start_dt.strftime('%Y%m%d%H%M')}_{end_dt.strftime('%Y%m%d%H%M')}.csv"
-            cache_path = os.path.join(cache_dir, cache_filename)
+            # Fetch from DB (1-minute candles)
+            print(f"DEBUG: Fetching DB candles for {epic} from {start_dt} to {end_dt}")
+            candles = fetch_candles_range(
+                epic, start_dt.isoformat(), end_dt.isoformat()
+            )
 
             df = pd.DataFrame()
+            if candles:
+                df = pd.DataFrame(candles)
+                # Ensure columns are correct types
+                if "timestamp" in df.columns:
+                    df["timestamp"] = pd.to_datetime(df["timestamp"])
+                    df.set_index("timestamp", inplace=True)
 
-            if os.path.exists(cache_path):
-                print(f"DEBUG: Cache HIT. Loading from {cache_path}")
-                try:
-                    df = pd.read_csv(cache_path, index_col=0, parse_dates=True)
-                except Exception as e:
-                    print(f"Error reading cache: {e}. Re-fetching.")
+                    # Resample
+                    agg_dict = {
+                        "open": "first",
+                        "high": "max",
+                        "low": "min",
+                        "close": "last",
+                    }
+                    if "volume" in df.columns:
+                        agg_dict["volume"] = "sum"
+
+                    # Resample and drop NaNs (empty bins)
+                    df_resampled = df.resample(resample_rule).agg(agg_dict).dropna()
+                    df = df_resampled.reset_index()
 
             if df.empty:
                 print(
-                    f"DEBUG: Cache MISS. Fetching IG data for {epic} ({resolution})..."
+                    f"No graph data found in DB for {epic} (Range: {start_dt} - {end_dt})"
                 )
-                try:
-                    df = client.fetch_historical_data_by_range(
-                        epic, resolution, start_dt.strftime(fmt), end_dt.strftime(fmt)
-                    )
-                    # Save to cache if valid
-                    if not df.empty:
-                        df.to_csv(cache_path)
-                        print(f"DEBUG: Saved data to {cache_path}")
-                except Exception as e:
-                    print(f"IG Data Fetch failed: {e}. Graph will be empty.")
-                    # Do not fallback to YFinance
-
-            if df.empty:
-                print(f"No graph data found for {epic}")
                 self.is_loading_graph = False
                 return
 
-            if isinstance(df.index, pd.DatetimeIndex):
-                df = df.reset_index()
-            date_col = df.columns[0]
-
-            # Check cache if needed, but plotting is fast enough usually
+            # Proceed with Plotting
+            date_col = df.columns[0]  # Should be 'timestamp'
 
             # --- Plotly Figure Construction ---
             fig = go.Figure(
@@ -723,6 +724,20 @@ def index() -> rx.Component:
                 width="100%",
             ),
             rx.hstack(
+                rx.text("From:", font_weight="bold"),
+                rx.input(
+                    type="date",
+                    value=State.start_date,
+                    on_change=State.set_start,
+                    width="150px",
+                ),
+                rx.text("To:", font_weight="bold"),
+                rx.input(
+                    type="date",
+                    value=State.end_date,
+                    on_change=State.set_end,
+                    width="150px",
+                ),
                 rx.spacer(),
                 rx.text(f"Last Updated: {State.last_updated}", color="gray"),
                 rx.button("Refresh", on_click=State.load_data),
