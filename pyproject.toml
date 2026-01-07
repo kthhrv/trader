@@ -16,6 +16,7 @@ dependencies = [
     "pytest-cov>=7.0.0",
     "python-dotenv>=1.2.1",
     "reflex>=0.6.4",
+    "requests>=2.32.5",
     "tenacity>=9.1.2",
     "trading-ig>=0.0.22",
 ]

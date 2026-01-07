@@ -31,6 +31,7 @@ from src.trade_monitor_db import TradeMonitorDB
 from src.stream_manager import StreamManager
 from src.scorecard import generate_scorecard
 from src.opportunity_analyzer import OpportunityAnalyzer
+from src.notification_service import HomeAssistantNotifier, HANotificationHandler
 
 import os
 
@@ -39,6 +40,9 @@ warnings.simplefilter(action="ignore", category=FutureWarning)
 # Ensure logs directory exists
 os.makedirs("logs", exist_ok=True)
 
+# Initialize Notification Service
+notifier = HomeAssistantNotifier()
+
 # Configure Logging
 logging.basicConfig(
     level=logging.INFO,
@@ -46,6 +50,7 @@ logging.basicConfig(
     handlers=[
         logging.FileHandler("logs/trader.log"),
         logging.StreamHandler(sys.stdout),
+        HANotificationHandler(notifier),
     ],
 )
 logger = logging.getLogger(__name__)
@@ -1182,12 +1187,27 @@ def main():
         type=str,
         help="Delete a trade log entry by Deal ID or DB ID (e.g., DB:123).",
     )
+    parser.add_argument(
+        "--test-alert",
+        action="store_true",
+        help="Send a test HIGH PRIORITY alert to Home Assistant and exit.",
+    )
 
     args = parser.parse_args()
 
     # Register signal handlers
     signal.signal(signal.SIGINT, graceful_shutdown)
     signal.signal(signal.SIGTERM, graceful_shutdown)
+
+    if args.test_alert:
+        logger.info("Sending test alert to Home Assistant...")
+        notifier.send_notification(
+            title="TRADER: Test Alert",
+            message="This is a test of the High Priority notification system. If you see this, it works!",
+            priority="high",
+        )
+        print("Alert sent. Check your device.")
+        return
 
     if args.weekly_powerlaw_events:
         run_weekly_powerlaw_check(force_api_fetch=args.force_api_fetch)

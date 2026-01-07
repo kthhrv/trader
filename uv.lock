@@ -1808,6 +1808,7 @@ dependencies = [
     { name = "pytest-cov" },
     { name = "python-dotenv" },
     { name = "reflex" },
+    { name = "requests" },
     { name = "tenacity" },
     { name = "trading-ig" },
 ]
@@ -1833,6 +1834,7 @@ requires-dist = [
     { name = "pytest-cov", specifier = ">=7.0.0" },
     { name = "python-dotenv", specifier = ">=1.2.1" },
     { name = "reflex", specifier = ">=0.6.4" },
+    { name = "requests", specifier = ">=2.32.5" },
     { name = "tenacity", specifier = ">=9.1.2" },
     { name = "trading-ig", specifier = ">=0.0.22" },
 ]

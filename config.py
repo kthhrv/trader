@@ -26,6 +26,11 @@ IG_ACC_ID = os.getenv("IG_ACC_ID")
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
+# --- Home Assistant ---
+HA_API_URL = os.getenv("HA_API_URL", "http://192.168.0.207:8123")
+HA_ACCESS_TOKEN = os.getenv("HA_ACCESS_TOKEN")
+HA_NOTIFY_ENTITY = os.getenv("HA_NOTIFY_ENTITY", "notify.mobile_app_pixel_8")
+
 # --- Configuration Checks ---
 if not GEMINI_API_KEY:
     print("WARNING: GEMINI_API_KEY is not set.")
