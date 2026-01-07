@@ -397,7 +397,7 @@ def save_candle(
     try:
         cursor.execute(
             """
-            INSERT INTO market_candles_1m (timestamp, epic, open, high, low, close, volume) 
+            INSERT OR IGNORE INTO market_candles_1m (timestamp, epic, open, high, low, close, volume) 
             VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             (timestamp, epic, open_price, high, low, close, volume),
@@ -405,6 +405,54 @@ def save_candle(
         conn.commit()
     except Exception as e:
         logger.error(f"Failed to save candle: {e}")
+    finally:
+        conn.close()
+
+
+def save_candles_batch(epic: str, df, db_path=None):
+    """
+    Saves a batch of candles from a DataFrame into the database.
+    Uses INSERT OR IGNORE to prevent duplicates.
+    """
+    if df is None or df.empty:
+        return
+
+    conn = get_db_connection(db_path)
+    cursor = conn.cursor()
+    try:
+        # Prepare data for insertion
+        # Assuming df index is timestamp and columns are ['open', 'high', 'low', 'close', 'volume']
+        data = []
+        for ts, row in df.iterrows():
+            # Convert timestamp to ISO string if it is a datetime object
+            ts_str = ts.isoformat() if hasattr(ts, "isoformat") else str(ts)
+
+            # Handle missing volume
+            vol = int(row["volume"]) if "volume" in row else 0
+
+            data.append(
+                (
+                    ts_str,
+                    epic,
+                    float(row["open"]),
+                    float(row["high"]),
+                    float(row["low"]),
+                    float(row["close"]),
+                    vol,
+                )
+            )
+
+        cursor.executemany(
+            """
+            INSERT OR IGNORE INTO market_candles_1m (timestamp, epic, open, high, low, close, volume)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            data,
+        )
+        conn.commit()
+        logger.info(f"Saved {len(data)} candles for {epic} to database.")
+    except Exception as e:
+        logger.error(f"Failed to save candles batch: {e}")
     finally:
         conn.close()
 

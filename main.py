@@ -19,6 +19,7 @@ from src.database import (
     update_trade_outcome,
     fetch_trades_in_range,
     delete_trade_log,
+    save_candles_batch,
 )
 from src.gemini_analyst import (
     GeminiAnalyst,
@@ -579,6 +580,10 @@ def run_post_mortem(deal_id: str):
             price_history_df = client.fetch_historical_data_by_range(
                 epic=epic, resolution="1Min", start_date=start_time, end_date=end_time
             )
+
+            if price_history_df is not None and not price_history_df.empty:
+                logger.info("Saving fetched historical data to database...")
+                save_candles_batch(epic, price_history_df)
     except Exception as e:
         logger.warning(f"Failed to fetch historical price context for post-mortem: {e}")
 
