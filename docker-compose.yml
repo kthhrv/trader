@@ -1,0 +1,25 @@
+services:
+  bot:
+    build: .
+    command: uv run python main.py
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    env_file:
+      - .env
+    restart: unless-stopped
+
+  ui:
+    build: .
+    command: sh -c "cd web_ui && uv run reflex run --backend-port 8000 --frontend-port 3000"
+    ports:
+      - "3000:3000"
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    env_file:
+      - .env
+    restart: unless-stopped
+    depends_on:
+      - bot
