@@ -800,12 +800,9 @@ def index() -> rx.Component:
                 rx.table.header(
                     rx.table.row(
                         rx.table.column_header_cell("Date"),
-                        rx.table.column_header_cell("Ticker"),
+                        rx.table.column_header_cell("Deal ID"),
+                        rx.table.column_header_cell("Epic"),
                         rx.table.column_header_cell("Action"),
-                        rx.table.cell("Entry"),
-                        rx.table.cell("Init SL"),
-                        rx.table.cell("Final SL"),
-                        rx.table.cell("Exit"),
                         rx.table.cell("PnL"),
                         rx.table.cell("Outcome"),
                         rx.table.cell("View"),
@@ -816,13 +813,15 @@ def index() -> rx.Component:
                         State.trades,
                         lambda trade: rx.table.row(
                             rx.table.cell(trade["timestamp"]),
+                            rx.table.cell(trade["deal_id"]),
                             rx.table.cell(trade["epic"]),
                             rx.table.cell(trade["action"]),
-                            rx.table.cell(trade["entry"]),
-                            rx.table.cell(trade["initial_stop_loss"]),
-                            rx.table.cell(trade["stop_loss"]),
-                            rx.table.cell(trade["exit_price"]),
-                            rx.table.cell(trade["pnl"]),
+                            rx.table.cell(
+                                trade["pnl"],
+                                color=rx.cond(
+                                    trade["pnl"].to(float) >= 0, "green", "red"
+                                ),
+                            ),
                             rx.table.cell(trade["outcome"]),
                             rx.table.cell(
                                 rx.button(
