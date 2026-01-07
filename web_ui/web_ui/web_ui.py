@@ -22,7 +22,7 @@ class State(rx.State):
     pnl_history: list[dict] = []
 
     # Date Filter State
-    start_date: str = "2026-01-05"
+    start_date: str = "2026-01-04"
     end_date: str = datetime.now().strftime("%Y-%m-%d")
 
     # Scorecard Stats
