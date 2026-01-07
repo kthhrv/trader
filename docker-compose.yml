@@ -23,3 +23,14 @@ services:
     restart: unless-stopped
     depends_on:
       - bot
+
+  watchdog:
+    build: .
+    command: uv run python watchdog.py
+    volumes:
+      - ./data:/app/data
+    env_file:
+      - .env
+    restart: unless-stopped
+    depends_on:
+      - bot

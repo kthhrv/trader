@@ -1055,6 +1055,17 @@ def graceful_shutdown(signum, frame):
     sys.exit(0)
 
 
+def update_heartbeat():
+    """
+    Updates the heartbeat file to indicate the system is alive.
+    """
+    try:
+        with open("data/heartbeat.txt", "w") as f:
+            f.write(datetime.now().isoformat())
+    except Exception as e:
+        logger.error(f"Failed to update heartbeat: {e}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="AI Market Open Trader")
     parser.add_argument(
@@ -1396,6 +1407,9 @@ def main():
     logger.info("Initializing AI Market Open Trader (Scheduler Mode)....")
 
     scheduler = BlockingScheduler()
+
+    # Heartbeat job
+    scheduler.add_job(update_heartbeat, "interval", minutes=1)
 
     # Schedule jobs based on MARKET_CONFIGS
     for market_key, config in MARKET_CONFIGS.items():
