@@ -47,7 +47,9 @@ def test_tp_overridden_when_trailing_stop():
     )
 
     # Execute internal order placement logic
-    engine._place_market_order(plan, current_spread=1.0, dry_run=False)
+    engine._place_market_order(
+        plan, current_spread=1.0, trigger_price=plan.entry, dry_run=False
+    )
 
     # Assertions
     mock_client.place_spread_bet_order.assert_called_once()
@@ -97,7 +99,9 @@ def test_tp_preserved_when_no_trailing_stop():
     )
 
     # Execute internal order placement logic
-    engine._place_market_order(plan, current_spread=1.0, dry_run=False)
+    engine._place_market_order(
+        plan, current_spread=1.0, trigger_price=plan.entry, dry_run=False
+    )
 
     # Assertions
     mock_client.place_spread_bet_order.assert_called_once()

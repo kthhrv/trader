@@ -208,16 +208,16 @@ def test_e2e_trading_flow(e2e_mocks, caplog):
         call_kwargs = mock_ig_client.place_spread_bet_order.call_args[1]
         assert call_kwargs["direction"] == "BUY"
         assert (
-            call_kwargs["size"] == 2.0
-        )  # Calculated: 10000 * 0.01 / (7500 - 7450) = 2.0
-        assert call_kwargs["stop_level"] == 7451.0  # Adjusted for slippage (7501 - 50)
+            call_kwargs["size"] == 1.96
+        )  # Calculated: 10000 * 0.01 / (7501 - 7450) = 100 / 51 = 1.9607... -> 1.96
+        assert call_kwargs["stop_level"] == 7450.0  # FIXED STOP LOSS
         assert call_kwargs["limit_level"] is None
         # Verify trade monitor started
         mock_trade_monitor.monitor_trade.assert_called_once_with(
             "MOCK_DEAL_ID",
             epic,
-            entry_price=7501.0,  # Adjusted Entry
-            stop_loss=7451.0,  # Adjusted Stop
+            entry_price=7501.0,  # Actual fill
+            stop_loss=7450.0,  # Fixed Stop
             atr=10.0,
             use_trailing_stop=True,
         )

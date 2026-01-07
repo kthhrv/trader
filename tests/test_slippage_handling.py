@@ -34,22 +34,23 @@ def mock_components():
         )
 
 
-def test_slippage_adjusts_stop_loss(mock_components, caplog):
+def test_slippage_reduces_size_fixed_stop_loss(mock_components, caplog):
     """
-    Verifies that if price has moved past target, the trade is still entered
-    but the Stop Loss is moved up/down to maintain the original risk distance.
+    Verifies that if price has moved past target (slippage), the trade is still entered
+    with the ORIGINAL Stop Loss, but the position size is REDUCED to maintain constant monetary risk.
     """
     mock_client, mock_trade_logger, mock_stream_manager = mock_components
 
     engine = StrategyEngine(
         "IX.D.NIKKEI.DAILY.IP",
-        max_spread=10.0,
+        max_spread=20.0,
         ig_client=mock_client,
         trade_logger=mock_trade_logger,
         stream_manager=mock_stream_manager,
     )
 
-    # Setup plan: Entry 1000, Stop 900. Risk = 100 pts.
+    # Setup plan: Entry 1000, Stop 900. Risk Distance = 100 pts.
+    # Initial risk amount calculation (mocked balance 10000 * 1% = 100) -> Size = 1.0
     plan = TradingSignal(
         ticker="NIKKEI",
         action=Action.BUY,
@@ -57,7 +58,7 @@ def test_slippage_adjusts_stop_loss(mock_components, caplog):
         stop_loss=900.0,
         take_profit=1200.0,
         confidence="high",
-        reasoning="Test",
+        reasoning="Test Slippage",
         size=1,
         atr=50.0,
         entry_type=EntryType.INSTANT,
@@ -67,6 +68,8 @@ def test_slippage_adjusts_stop_loss(mock_components, caplog):
     engine.active_plan_id = 123
 
     # Mock trigger at 1050 (50 points slippage)
+    # New Risk Distance = 1050 - 900 = 150 pts.
+    # New Size = 100 / 150 = 0.666... -> 0.67
     def trigger_price_update(seconds):
         # Provide price update
         engine._stream_price_update_handler(
@@ -86,8 +89,11 @@ def test_slippage_adjusts_stop_loss(mock_components, caplog):
         return current_time[0]
 
     mock_client.place_spread_bet_order.return_value = {"dealId": "OK", "level": 1050.0}
+
+    # Mock account info for size calculation
+    # Balance 10000, 1% risk = 100 currency units.
     mock_client.get_account_info.return_value = pd.DataFrame(
-        {"accountId": ["TEST_ACC_ID"], "available": [10000]}
+        {"accountId": ["TEST_ACC_ID"], "available": [10000.0]}
     )
 
     with (
@@ -99,18 +105,19 @@ def test_slippage_adjusts_stop_loss(mock_components, caplog):
     # Verify Trade was Placed
     assert engine.position_open is True
 
-    # CRITICAL CHECK: Was the stop loss adjusted?
-    # Original Risk = 100. Actual Entry = 1050. New Stop should be 950.
+    # CRITICAL CHECKS:
+    # 1. Was the stop loss KEPT at 900.0?
+    # 2. Was the size REDUCED to ~0.67?
     mock_client.place_spread_bet_order.assert_called_once_with(
         epic=ANY,
         direction="BUY",
-        size=ANY,
+        size=0.67,  # (10000 * 0.01) / (1050 - 900) = 100 / 150 = 0.666...
         level=1050.0,
-        stop_level=950.0,  # Adjusted!
+        stop_level=900.0,  # FIXED!
         limit_level=None,
     )
 
-    # Verify DB update reflects the adjusted entry
+    # Verify DB update reflects the actual fill and reduced size
     mock_trade_logger.update_trade_status.assert_any_call(
-        row_id=123, outcome="LIVE_PLACED", deal_id="OK", size=ANY, entry=1050.0
+        row_id=123, outcome="LIVE_PLACED", deal_id="OK", size=0.67, entry=1050.0
     )

@@ -443,26 +443,9 @@ class StrategyEngine:
                         trigger_price = bid_snapshot
 
                 if triggered:
-                    # --- Maintain Structural Risk Distance ---
-                    # Calculate original planned risk distance (points)
-                    original_risk = abs(plan.entry - plan.stop_loss)
-
-                    if abs(trigger_price - plan.entry) > 0.1:  # Significant deviation
-                        logger.info(
-                            f"Trigger Price ({trigger_price}) deviates from Target ({plan.entry}). "
-                            f"Adjusting Stop Loss to maintain {original_risk:.2f} risk distance."
-                        )
-
-                        # Update plan with the price reality at the moment of trigger
-                        plan.entry = trigger_price
-                        if plan.action == Action.BUY:
-                            plan.stop_loss = trigger_price - original_risk
-                        else:
-                            plan.stop_loss = trigger_price + original_risk
-
-                    # Proceed to execution
+                    # Proceed to execution with the actual market price at trigger (slippage included)
                     success = self._place_market_order(
-                        plan, current_spread, dry_run=self.dry_run
+                        plan, current_spread, trigger_price, dry_run=self.dry_run
                     )
                     if not success:
                         logger.warning(
@@ -554,13 +537,14 @@ class StrategyEngine:
         self,
         plan: TradingSignal,
         current_spread: float,
+        trigger_price: float,
         dry_run: bool,
     ) -> bool:
         try:
             logger.info("Placing MARKET order...")
             direction = "BUY" if plan.action == Action.BUY else "SELL"
             deal_id = None
-            execution_price = plan.entry
+            execution_price = trigger_price
 
             if plan.stop_loss is None:
                 return False
@@ -568,7 +552,9 @@ class StrategyEngine:
             if self.strategy_name == "TEST_TRADE":
                 size = plan.size
             else:
-                size = self._calculate_size(plan.entry, plan.stop_loss)
+                # Calculate size based on the ACTUAL entry (trigger_price) and the FIXED stop loss
+                # This ensures total risk amount is constant. If entry slips (worse), distance increases, so size decreases.
+                size = self._calculate_size(trigger_price, plan.stop_loss)
                 size = max(size, 0.04)
 
             take_profit_level = plan.take_profit
@@ -576,14 +562,16 @@ class StrategyEngine:
                 take_profit_level = None
 
             if dry_run:
-                logger.info(f"DRY RUN: {direction} {size} {self.epic} at {plan.entry}")
+                logger.info(
+                    f"DRY RUN: {direction} {size} {self.epic} at {trigger_price}"
+                )
                 outcome = "DRY_RUN_PLACED"
             else:
                 confirmation = self.client.place_spread_bet_order(
                     epic=self.epic,
                     direction=direction,
                     size=size,
-                    level=plan.entry,
+                    level=trigger_price,
                     stop_level=plan.stop_loss,
                     limit_level=take_profit_level,
                 )
