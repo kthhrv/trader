@@ -59,7 +59,8 @@ def test_tp_overridden_when_trailing_stop():
         "limit_level should be None when use_trailing_stop is True"
     )
     assert call_args["level"] == 7500.0
-    assert call_args["stop_level"] == 7450.0
+    # Adjusted Stop: 7450 - 1.0 (spread) = 7449.0
+    assert call_args["stop_level"] == 7449.0
 
 
 def test_tp_preserved_when_no_trailing_stop():

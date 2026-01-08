@@ -125,7 +125,15 @@ def test_e2e_trailing_stop(advanced_mocks, caplog):
 
     # Verify Trade Placed
     mock_ig_client.place_spread_bet_order.assert_called_once()
-    mock_trade_monitor.monitor_trade.assert_called_once()
+    # Adjusted Stop: 7450 - 1.0 (spread) = 7449
+    mock_trade_monitor.monitor_trade.assert_called_once_with(
+        "MOCK_DEAL_ID",
+        epic,
+        entry_price=7501.0,
+        stop_loss=7449.0,
+        atr=10.0,
+        use_trailing_stop=True,
+    )
 
     # 3. Simulate Price Movement for Trailing
     # Monitor is running in background (polling for trailing stop).

@@ -80,6 +80,7 @@ class TradeLoggerDB:
         deal_id: str = None,
         size: float = None,
         entry: float = None,
+        stop_loss: float = None,
     ):
         """
         Updates the status/outcome of an existing trade log entry.
@@ -104,6 +105,10 @@ class TradeLoggerDB:
                 updates.append("entry = ?")
                 params.append(entry)
 
+            if stop_loss is not None:
+                updates.append("stop_loss = ?")
+                params.append(stop_loss)
+
             params.append(row_id)
             query = f"UPDATE trade_log SET {', '.join(updates)} WHERE id = ?"
 
@@ -112,7 +117,7 @@ class TradeLoggerDB:
             conn.commit()
             conn.close()
             logger.info(
-                f"Updated trade outcome for Row ID {row_id} to: {outcome} (Deal ID: {deal_id}, Size: {size}, Entry: {entry})"
+                f"Updated trade outcome for Row ID {row_id} to: {outcome} (Deal ID: {deal_id}, Size: {size}, Entry: {entry}, SL: {stop_loss})"
             )
 
         except Exception as e:

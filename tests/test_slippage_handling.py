@@ -106,18 +106,25 @@ def test_slippage_reduces_size_fixed_stop_loss(mock_components, caplog):
     assert engine.position_open is True
 
     # CRITICAL CHECKS:
-    # 1. Was the stop loss KEPT at 900.0?
-    # 2. Was the size REDUCED to ~0.67?
+    # 1. Was the stop loss ADJUSTED for spread (1050-1045=5)? -> 900 - 5 = 895.0
+    # 2. Was the size REDUCED to maintain risk?
+    # Risk distance: 1050 - 895 = 155 pts.
+    # Size: 100 / 155 = 0.645... -> 0.65
     mock_client.place_spread_bet_order.assert_called_once_with(
         epic=ANY,
         direction="BUY",
-        size=0.67,  # (10000 * 0.01) / (1050 - 900) = 100 / 150 = 0.666...
+        size=0.65,
         level=1050.0,
-        stop_level=900.0,  # FIXED!
+        stop_level=895.0,  # ADJUSTED!
         limit_level=None,
     )
 
     # Verify DB update reflects the actual fill and reduced size
     mock_trade_logger.update_trade_status.assert_any_call(
-        row_id=123, outcome="LIVE_PLACED", deal_id="OK", size=0.67, entry=1050.0
+        row_id=123,
+        outcome="LIVE_PLACED",
+        deal_id="OK",
+        size=0.65,
+        entry=1050.0,
+        stop_loss=895.0,
     )

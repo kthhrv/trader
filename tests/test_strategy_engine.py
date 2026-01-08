@@ -288,6 +288,7 @@ def test_poll_market_triggers_buy(mock_components):
         deal_id="TEST_DEAL_ID",
         size=ANY,
         entry=7500.0,
+        stop_loss=7449.0,  # Adjusted for 1.0 spread
     )
 
 
@@ -539,7 +540,12 @@ def test_place_market_order_dry_run(mock_components, caplog):
         engine.execute_strategy(timeout_seconds=0.5)
 
     mock_client.place_spread_bet_order.assert_not_called()
-    assert "DRY RUN: BUY 1.0 EPIC at 7500.0" in caplog.text
+    assert "DRY RUN: BUY 1.0 EPIC at 7500.0 (Stop: 7449.0)" in caplog.text
     mock_trade_logger.update_trade_status.assert_called_with(
-        row_id=123, outcome="DRY_RUN_PLACED", deal_id=None, size=1.0, entry=7500.0
+        row_id=123,
+        outcome="DRY_RUN_PLACED",
+        deal_id=None,
+        size=1.0,
+        entry=7500.0,
+        stop_loss=7449.0,
     )

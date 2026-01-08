@@ -108,6 +108,9 @@ def test_trade_lifecycle_flow(lifecycle_db):
         "dealId": "REAL_DEAL_123",
         "dealStatus": "ACCEPTED",
     }
+    mock_client.get_market_info.return_value = {
+        "snapshot": {"bid": 99, "offer": 100}
+    }  # Spread ok
     mock_client.service.fetch_market_by_epic.return_value = {
         "snapshot": {"bid": 99, "offer": 100}
     }  # Spread ok

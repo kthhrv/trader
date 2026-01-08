@@ -549,12 +549,25 @@ class StrategyEngine:
             if plan.stop_loss is None:
                 return False
 
+            # Adjust Stop Loss by widening it by the current spread
+            # This protects the trade from spread-induced stop-outs on high-spread markets.
+            original_sl = plan.stop_loss
+            adjusted_sl = original_sl
+            if plan.action == Action.BUY:
+                adjusted_sl = original_sl - current_spread
+            elif plan.action == Action.SELL:
+                adjusted_sl = original_sl + current_spread
+
+            logger.info(
+                f"Adjusting Stop Loss for spread ({current_spread}): {original_sl} -> {adjusted_sl}"
+            )
+
             if self.strategy_name == "TEST_TRADE":
                 size = plan.size
             else:
-                # Calculate size based on the ACTUAL entry (trigger_price) and the FIXED stop loss
-                # This ensures total risk amount is constant. If entry slips (worse), distance increases, so size decreases.
-                size = self._calculate_size(trigger_price, plan.stop_loss)
+                # Calculate size based on the ACTUAL entry (trigger_price) and the ADJUSTED stop loss
+                # This ensures total risk amount is constant.
+                size = self._calculate_size(trigger_price, adjusted_sl)
                 size = max(size, 0.04)
 
             take_profit_level = plan.take_profit
@@ -563,7 +576,7 @@ class StrategyEngine:
 
             if dry_run:
                 logger.info(
-                    f"DRY RUN: {direction} {size} {self.epic} at {trigger_price}"
+                    f"DRY RUN: {direction} {size} {self.epic} at {trigger_price} (Stop: {adjusted_sl})"
                 )
                 outcome = "DRY_RUN_PLACED"
             else:
@@ -572,7 +585,7 @@ class StrategyEngine:
                     direction=direction,
                     size=size,
                     level=trigger_price,
-                    stop_level=plan.stop_loss,
+                    stop_level=adjusted_sl,
                     limit_level=take_profit_level,
                 )
                 outcome = "LIVE_PLACED"
@@ -591,6 +604,7 @@ class StrategyEngine:
                     deal_id=deal_id,
                     size=size,
                     entry=execution_price,
+                    stop_loss=adjusted_sl,  # Update the DB with the adjusted SL
                 )
 
             if not dry_run and deal_id:
@@ -598,7 +612,7 @@ class StrategyEngine:
                     deal_id,
                     self.epic,
                     entry_price=execution_price,
-                    stop_loss=plan.stop_loss,
+                    stop_loss=adjusted_sl,
                     atr=plan.atr,
                     use_trailing_stop=plan.use_trailing_stop,
                 )
