@@ -367,9 +367,10 @@ def trade_mobile_card(trade: dict) -> rx.Component:
             rx.hstack(
                 rx.badge(trade["epic"], size="2"),
                 rx.spacer(),
-                # Removed .split() which caused error. Timestamp is already string.
-                # Ideally format in backend or use rx.moment
-                rx.text(trade["timestamp"], font_size="0.8em", color="gray"),
+                # Use rx.moment for pretty date formatting
+                rx.moment(
+                    trade["timestamp"], format="DD MMM, HH:mm", size="1", color="gray"
+                ),
                 width="100%",
             ),
             rx.hstack(
@@ -651,7 +652,11 @@ def index() -> rx.Component:
                         rx.foreach(
                             State.trades,
                             lambda trade: rx.table.row(
-                                rx.table.cell(trade["timestamp"]),
+                                rx.table.cell(
+                                    rx.moment(
+                                        trade["timestamp"], format="DD MMM, HH:mm"
+                                    )
+                                ),
                                 rx.table.cell(trade["deal_id"]),
                                 rx.table.cell(trade["epic"]),
                                 rx.table.cell(trade["action"]),
