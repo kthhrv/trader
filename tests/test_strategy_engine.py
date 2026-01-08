@@ -557,3 +557,79 @@ def test_place_market_order_dry_run(mock_components, caplog):
         entry=7500.0,
         stop_loss=7449.0,
     )
+
+
+def test_generate_plan_session_context(mock_components):
+    """
+    Verifies that the session context (Today's High/Low) uses only today's data.
+    """
+    (
+        mock_client,
+        mock_analyst,
+        _,
+        _,
+        mock_market_status,
+        _,
+        _,
+    ) = mock_components
+
+    # Setup: Generate enough candles to satisfy indicator requirements (ATR/RSI)
+    # 30 candles total.
+    # Last 3 are "Today". Previous 27 are "Yesterday".
+    today = pd.Timestamp.now().normalize()
+    yesterday = today - pd.Timedelta(days=1)
+
+    dates = []
+    # 27 candles yesterday
+    for i in range(27):
+        dates.append(yesterday + pd.Timedelta(hours=8, minutes=15 * i))
+    # 3 candles today
+    for i in range(3):
+        dates.append(today + pd.Timedelta(hours=8, minutes=15 * i))
+
+    # Prices:
+    # Yesterday: Highs around 8000.
+    # Today: High 7500, Low 7400.
+    opens = [7900] * 27 + [7450, 7480, 7420]
+    highs = [8050] * 27 + [7500, 7490, 7430]  # Yesterday 8050, Today 7500
+    lows = [7850] * 27 + [7400, 7460, 7410]  # Today 7400
+    closes = [7950] * 27 + [7480, 7470, 7415]  # Latest 7415
+    volumes = [1000] * 30
+
+    data = {
+        "open": opens,
+        "high": highs,
+        "low": lows,
+        "close": closes,
+        "volume": volumes,
+    }
+    mock_df = pd.DataFrame(data, index=pd.DatetimeIndex(dates))
+    mock_client.fetch_historical_data.return_value = mock_df
+
+    mock_analyst.analyze_market.return_value = TradingSignal(
+        ticker="TEST",
+        action=Action.WAIT,
+        entry=0,
+        stop_loss=0,
+        take_profit=0,
+        confidence="low",
+        reasoning="Context Test",
+        size=0,
+        atr=0,
+        entry_type=EntryType.INSTANT,
+        use_trailing_stop=False,
+    )
+
+    engine = StrategyEngine("EPIC")
+    engine.generate_plan()
+
+    # Verify the prompt sent to Gemini
+    assert mock_analyst.analyze_market.called
+    args, _ = mock_analyst.analyze_market.call_args
+    context_str = args[0]
+
+    # Should contain Today's High/Low (7500/7400) NOT Yesterday's (8050)
+    assert "Today's High: 7500" in context_str
+    assert "Today's Low:  7400" in context_str
+    # Calculation: (7415 - 7400) / (7500 - 7400) = 15/100 = 15%
+    assert "Current Position in Range: 15%" in context_str
