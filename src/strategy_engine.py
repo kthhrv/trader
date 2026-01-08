@@ -34,6 +34,7 @@ class StrategyEngine:
         trade_monitor: Optional[TradeMonitorDB] = None,
         market_status: Optional[MarketStatus] = None,
         stream_manager: Optional[StreamManager] = None,
+        risk_scale: float = 1.0,
     ):
         """
         Orchestrates the trading workflow for a single instrument.
@@ -46,6 +47,7 @@ class StrategyEngine:
         self.verbose = verbose
         self.max_spread = max_spread
         self.ignore_holidays = ignore_holidays
+        self.risk_scale = risk_scale
 
         self.client = ig_client if ig_client else IGClient()
         self.analyst = analyst if analyst else GeminiAnalyst()
@@ -561,7 +563,13 @@ class StrategyEngine:
             if balance <= 0:
                 return 0.5
 
-            risk_amount = balance * RISK_PER_TRADE_PERCENT
+            # Apply Risk Scale (Default 1.0)
+            risk_amount = balance * RISK_PER_TRADE_PERCENT * self.risk_scale
+            if self.risk_scale != 1.0:
+                logger.info(
+                    f"Risk Scale applied: {self.risk_scale} -> Target Risk: £{risk_amount:.2f}"
+                )
+
             stop_distance = abs(entry - stop_loss)
 
             if stop_distance <= 0:
