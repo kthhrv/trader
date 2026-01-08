@@ -359,11 +359,18 @@ class State(rx.State):
             # Layout Styling for Dark Mode
             fig.update_layout(
                 template="plotly_dark",
-                margin=dict(l=20, r=20, t=20, b=20),
+                margin=dict(l=20, r=20, t=20, b=100),  # More bottom margin for legend
                 xaxis_rangeslider_visible=False,
                 height=400,
                 paper_bgcolor="rgba(0,0,0,0)",  # Transparent background
                 plot_bgcolor="rgba(0,0,0,0)",
+                legend=dict(
+                    orientation="h",
+                    yanchor="top",
+                    y=-0.2,
+                    xanchor="center",
+                    x=0.5,
+                ),
             )
 
             self.chart_figure = fig
