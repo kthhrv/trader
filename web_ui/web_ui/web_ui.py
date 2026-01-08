@@ -569,6 +569,52 @@ class State(rx.State):
         self.is_fullscreen = False
 
 
+def trade_mobile_card(trade: dict) -> rx.Component:
+    """Renders a single trade as a card for mobile view."""
+    return rx.card(
+        rx.vstack(
+            rx.hstack(
+                rx.badge(trade["epic"], size="2"),
+                rx.spacer(),
+                # Removed .split() which caused error. Timestamp is already string.
+                # Ideally format in backend or use rx.moment
+                rx.text(trade["timestamp"], font_size="0.8em", color="gray"),
+                width="100%",
+            ),
+            rx.hstack(
+                rx.badge(
+                    trade["action"],
+                    color_scheme=rx.cond(trade["action"] == "BUY", "green", "red"),
+                ),
+                rx.spacer(),
+                rx.text(
+                    rx.cond(trade["pnl"], f"£{trade['pnl']}", "N/A"),
+                    font_weight="bold",
+                    color=rx.cond(
+                        trade["pnl"].to(float) >= 0, "green", "red"
+                    ),  # Added cast
+                ),
+                width="100%",
+            ),
+            rx.hstack(
+                rx.text(f"Outcome: {trade['outcome']}", font_size="0.8em"),
+                rx.spacer(),
+                rx.button(
+                    rx.icon("chart-line"),
+                    size="1",
+                    variant="ghost",
+                    on_click=lambda: State.open_trade_detail(trade),
+                ),
+                width="100%",
+            ),
+            spacing="2",
+            width="100%",
+        ),
+        width="100%",
+        margin_bottom="0.5em",
+    )
+
+
 def clock_badge(label: str, timezone: str) -> rx.Component:
     return rx.card(
         rx.vstack(
@@ -698,43 +744,44 @@ def index() -> rx.Component:
         trade_detail_modal(),
         rx.vstack(
             rx.heading("Gemini Trader Bot", size="8"),
-            rx.grid(
-                clock_badge("Australia", "Australia/Sydney"),
-                clock_badge("Nikkei", "Asia/Tokyo"),
-                clock_badge("Germany", "Europe/Berlin"),
-                clock_badge("London", "Europe/London"),
-                clock_badge("NY (S&P)", "America/New_York"),
-                clock_badge("US Tech", "America/New_York"),
-                columns="6",
-                spacing="2",
-                width="100%",
-            ),
-            rx.hstack(
-                rx.text("From:", font_weight="bold"),
-                rx.input(
-                    type="date",
-                    value=State.start_date,
-                    on_change=State.set_start,
-                    width="150px",
-                ),
-                rx.text("To:", font_weight="bold"),
-                rx.input(
-                    type="date",
-                    value=State.end_date,
-                    on_change=State.set_end,
-                    width="150px",
+            rx.flex(
+                rx.hstack(
+                    rx.text("From:", font_weight="bold"),
+                    rx.input(
+                        type="date",
+                        value=State.start_date,
+                        on_change=State.set_start,
+                        width="150px",
+                    ),
+                    rx.text("To:", font_weight="bold"),
+                    rx.input(
+                        type="date",
+                        value=State.end_date,
+                        on_change=State.set_end,
+                        width="150px",
+                    ),
+                    spacing="2",
                 ),
                 rx.spacer(),
-                rx.text(f"Last Updated: {State.last_updated}", color="gray"),
-                rx.button("Refresh", on_click=State.load_data),
-                rx.button(
-                    "Demo Chart",
-                    on_click=State.show_demo_chart,
-                    variant="surface",
-                    color_scheme="blue",
+                rx.vstack(
+                    rx.text(
+                        f"Last Updated: {State.last_updated}", color="gray", size="1"
+                    ),
+                    rx.hstack(
+                        rx.button("Refresh", on_click=State.load_data, size="2"),
+                        rx.button(
+                            "Demo",
+                            on_click=State.show_demo_chart,
+                            variant="surface",
+                            color_scheme="blue",
+                            size="2",
+                        ),
+                    ),
+                    align_items="end",
                 ),
-                spacing="2",
                 width="100%",
+                flex_wrap="wrap",
+                gap="2",
                 align_items="center",
             ),
             rx.divider(),
@@ -774,7 +821,7 @@ def index() -> rx.Component:
                         rx.heading(f"{State.conversion_rate}%", size="6"),
                     )
                 ),
-                columns="5",
+                columns=rx.breakpoints(initial="2", sm="3", lg="5"),
                 spacing="2",
                 width="100%",
             ),
@@ -796,45 +843,56 @@ def index() -> rx.Component:
             ),
             rx.divider(),
             rx.heading("Recent Trades", size="5"),
-            rx.table.root(
-                rx.table.header(
-                    rx.table.row(
-                        rx.table.column_header_cell("Date"),
-                        rx.table.column_header_cell("Deal ID"),
-                        rx.table.column_header_cell("Epic"),
-                        rx.table.column_header_cell("Action"),
-                        rx.table.cell("PnL"),
-                        rx.table.cell("Outcome"),
-                        rx.table.cell("View"),
+            # Mobile View (Cards)
+            rx.mobile_only(
+                rx.vstack(
+                    rx.foreach(State.trades, trade_mobile_card),
+                    width="100%",
+                    spacing="2",
+                )
+            ),
+            # Desktop/Tablet View (Table)
+            rx.tablet_and_desktop(
+                rx.table.root(
+                    rx.table.header(
+                        rx.table.row(
+                            rx.table.column_header_cell("Date"),
+                            rx.table.column_header_cell("Deal ID"),
+                            rx.table.column_header_cell("Epic"),
+                            rx.table.column_header_cell("Action"),
+                            rx.table.cell("PnL"),
+                            rx.table.cell("Outcome"),
+                            rx.table.cell("View"),
+                        ),
                     ),
-                ),
-                rx.table.body(
-                    rx.foreach(
-                        State.trades,
-                        lambda trade: rx.table.row(
-                            rx.table.cell(trade["timestamp"]),
-                            rx.table.cell(trade["deal_id"]),
-                            rx.table.cell(trade["epic"]),
-                            rx.table.cell(trade["action"]),
-                            rx.table.cell(
-                                trade["pnl"],
-                                color=rx.cond(
-                                    trade["pnl"].to(float) >= 0, "green", "red"
+                    rx.table.body(
+                        rx.foreach(
+                            State.trades,
+                            lambda trade: rx.table.row(
+                                rx.table.cell(trade["timestamp"]),
+                                rx.table.cell(trade["deal_id"]),
+                                rx.table.cell(trade["epic"]),
+                                rx.table.cell(trade["action"]),
+                                rx.table.cell(
+                                    trade["pnl"],
+                                    color=rx.cond(
+                                        trade["pnl"].to(float) >= 0, "green", "red"
+                                    ),
+                                ),
+                                rx.table.cell(trade["outcome"]),
+                                rx.table.cell(
+                                    rx.button(
+                                        rx.icon("chart-line"),
+                                        size="1",
+                                        variant="ghost",
+                                        on_click=lambda: State.open_trade_detail(trade),
+                                    )
                                 ),
                             ),
-                            rx.table.cell(trade["outcome"]),
-                            rx.table.cell(
-                                rx.button(
-                                    rx.icon("chart-line"),
-                                    size="1",
-                                    variant="ghost",
-                                    on_click=lambda: State.open_trade_detail(trade),
-                                )
-                            ),
-                        ),
-                    )
-                ),
-                width="100%",
+                        )
+                    ),
+                    width="100%",
+                )
             ),
             spacing="4",  # Place spacing as the last keyword argument of rx.vstack
         ),
