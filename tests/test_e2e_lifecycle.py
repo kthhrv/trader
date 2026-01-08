@@ -75,6 +75,10 @@ def test_trade_lifecycle_flow(lifecycle_db):
         "volume": [1000] * 50,
     }
     mock_df = pd.DataFrame(data)
+    # Important: Set DatetimeIndex for session context filtering
+    mock_df.index = pd.to_datetime(
+        [pd.Timestamp.now() - pd.Timedelta(minutes=15 * i) for i in range(50)][::-1]
+    )
     mock_client.fetch_historical_data.return_value = mock_df
 
     mock_analyst.analyze_market.return_value = TradingSignal(
@@ -205,6 +209,10 @@ def test_trade_lifecycle_timeout(lifecycle_db):
         "volume": [1000] * 50,
     }
     mock_df = pd.DataFrame(data)
+    # Important: Set DatetimeIndex for session context filtering
+    mock_df.index = pd.to_datetime(
+        [pd.Timestamp.now() - pd.Timedelta(minutes=15 * i) for i in range(50)][::-1]
+    )
     mock_client.fetch_historical_data.return_value = mock_df
 
     engine.generate_plan()

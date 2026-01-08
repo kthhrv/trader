@@ -95,6 +95,10 @@ def test_generate_plan_success(mock_components):
         "volume": [1000] * 50,
     }
     mock_df = pd.DataFrame(data)
+    # Important: Set DatetimeIndex
+    mock_df.index = pd.to_datetime(
+        [pd.Timestamp.now() - pd.Timedelta(minutes=15 * i) for i in range(50)][::-1]
+    )
     mock_client.fetch_historical_data.return_value = mock_df
 
     # Mock analysis result
@@ -141,6 +145,10 @@ def test_generate_plan_wait(mock_components, caplog):
         "volume": [1000] * 50,
     }
     mock_df = pd.DataFrame(data)
+    # Important: Set DatetimeIndex
+    mock_df.index = pd.to_datetime(
+        [pd.Timestamp.now() - pd.Timedelta(minutes=15 * i) for i in range(50)][::-1]
+    )
     mock_client.fetch_historical_data.return_value = mock_df
 
     # Mock analysis result to return Action.WAIT

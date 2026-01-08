@@ -1,6 +1,7 @@
 import logging
 import time
 import threading
+from datetime import datetime  # Added import
 from typing import Optional
 import pandas as pd
 import pandas_ta as ta
@@ -124,6 +125,31 @@ class StrategyEngine:
             elif vol_ratio > 1.2:
                 vol_state = "HIGH (Caution: Expect wider swings)"
 
+            # --- Session Extremes (Intraday) ---
+            # Extract candles for the current calendar day
+            today_str = datetime.now().date().isoformat()
+
+            session_high = None
+            session_low = None
+
+            try:
+                # Ensure index is DatetimeIndex before filtering
+                if not isinstance(df.index, pd.DatetimeIndex):
+                    # Try to convert if possible, otherwise assume we can't filter
+                    temp_index = pd.to_datetime(df.index, errors="coerce")
+                    if not temp_index.isna().all():
+                        df_today = df[temp_index.strftime("%Y-%m-%d") == today_str]
+                    else:
+                        df_today = pd.DataFrame()  # Empty
+                else:
+                    df_today = df[df.index.strftime("%Y-%m-%d") == today_str]
+
+                if not df_today.empty:
+                    session_high = df_today["high"].max()
+                    session_low = df_today["low"].min()
+            except Exception as e:
+                logger.warning(f"Could not calculate session extremes: {e}")
+
             yesterday_close = prev_close
             if not df_daily.empty and len(df_daily) >= 2:
                 yesterday_close = df_daily.iloc[-2]["close"]
@@ -142,7 +168,23 @@ class StrategyEngine:
             market_context += "Recent OHLC Data (Last 12 Hours, 15m intervals):\n"
             market_context += df.to_string()
 
-            market_context += "\n\n--- Technical Indicators (Latest Candle) ---\n"
+            market_context += "\n\n--- Session Context (Today so far) ---\n"
+            if session_high is not None and session_low is not None:
+                market_context += f"Today's High: {session_high}\n"
+                market_context += f"Today's Low:  {session_low}\n"
+                position_in_range = 0
+                if session_high != session_low:
+                    position_in_range = int(
+                        ((latest["close"] - session_low) / (session_high - session_low))
+                        * 100
+                    )
+                market_context += f"Current Position in Range: {position_in_range}% (0%=Low, 100%=High)\n"
+            else:
+                market_context += (
+                    "Today's intraday high/low data not yet established.\n"
+                )
+
+            market_context += "\n--- Technical Indicators (Latest Candle) ---\n"
             market_context += f"RSI (14): {latest['RSI']:.2f}\n"
             market_context += f"ATR (14): {current_atr:.2f}\n"
             market_context += f"Avg ATR (Last 50): {avg_atr:.2f}\n"
