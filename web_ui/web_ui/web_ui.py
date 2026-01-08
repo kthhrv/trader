@@ -70,6 +70,24 @@ class State(rx.State):
             processed_trades = []
             for t in raw_trades:
                 processed_t = {k: (v if v is not None else "") for k, v in t.items()}
+
+                # Abbreviate Epic for display
+                full_epic = processed_t.get("epic", "")
+                short_epic = full_epic
+                if "FTSE" in full_epic:
+                    short_epic = "FTSE"
+                elif "DAX" in full_epic:
+                    short_epic = "DAX"
+                elif "SPTRD" in full_epic or "US500" in full_epic:
+                    short_epic = "S&P 500"
+                elif "NASDAQ" in full_epic or "NDX" in full_epic:
+                    short_epic = "NASDAQ"
+                elif "NIKKEI" in full_epic:
+                    short_epic = "NIKKEI"
+                elif "ASX" in full_epic:
+                    short_epic = "ASX"
+
+                processed_t["epic_display"] = short_epic
                 processed_trades.append(processed_t)
             self.trades = processed_trades
 
@@ -365,7 +383,7 @@ def trade_mobile_card(trade: dict) -> rx.Component:
     return rx.card(
         rx.vstack(
             rx.hstack(
-                rx.badge(trade["epic"], size="2"),
+                rx.badge(trade["epic_display"], size="2"),
                 rx.spacer(),
                 # Use rx.moment for pretty date formatting
                 rx.moment(
@@ -658,7 +676,7 @@ def index() -> rx.Component:
                                     )
                                 ),
                                 rx.table.cell(trade["deal_id"]),
-                                rx.table.cell(trade["epic"]),
+                                rx.table.cell(trade["epic_display"]),
                                 rx.table.cell(trade["action"]),
                                 rx.table.cell(
                                     trade["pnl"],
