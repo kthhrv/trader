@@ -616,13 +616,7 @@ def index() -> rx.Component:
                         rx.heading(State.total_trades.to_string(), size="6"),
                     )
                 ),
-                rx.card(
-                    rx.vstack(
-                        rx.text("AI Conv. Rate", size="1"),
-                        rx.heading(f"{State.conversion_rate}%", size="6"),
-                    )
-                ),
-                columns=rx.breakpoints(initial="2", sm="3", lg="5"),
+                columns=rx.breakpoints(initial="2", sm="3", lg="4"),
                 spacing="2",
                 width="100%",
             ),
