@@ -87,16 +87,20 @@ class GeminiAnalyst:
             2. **Structure over Arbitrary Ratios:** Do not place stops inside the rejection zone. If the structural invalidation point (e.g. 6829) requires a stop that is too wide for the account risk parameters, reduce position size rather than tightening the stop to an arbitrary level (e.g. 6816).
             3. If the market conditions are choppy, low liquidity, or unclear (e.g., conflicting signals), recommend 'WAIT'.
             4. **Entry Strategy:** All trades must use **'INSTANT'** entry type. Focus on identifying the exact breakout level where the 'wave' starts.
-            5. **Trailing Stop Strategy:**
+            5. **Volatility Regime Logic (CRITICAL):**
+               - If the market context indicates **LOW Volatility** (Current ATR < Average ATR or 'Choppy' regime), BREAKOUT strategies have a high failure rate. In these conditions, prioritize **MEAN REVERSION** (Buying Support / Selling Resistance) or **WAIT**.
+               - **EXCEPTION:** If you identify a **'Coiling' pattern** (price consolidating in a narrowing range, e.g., higher lows into a flat resistance), a breakout entry is valid as it anticipates a volatility expansion. Do NOT buy Session Highs in low volatility *unless* this specific coiling/consolidation pattern is clearly present.
+               - If **HIGH Volatility** (ATR > Average, Strong Momentum), Breakout strategies are preferred.
+            6. **Trailing Stop Strategy:**
                - Set **'use_trailing_stop' = True** if the setup is a high-momentum breakout where price could run significantly (Trend Following).
                - Set **'use_trailing_stop' = False** if the setup is targeting a specific resistance level or trading inside a range (Mean Reversion), where a fixed Take Profit is better.
-            6. Your output MUST follow a Chain-of-Thought process BEFORE the JSON, like this:
+            7. Your output MUST follow a Chain-of-Thought process BEFORE the JSON, like this:
                *   **Market Overview:** Summarize the current trend, volatility (ATR), and momentum (RSI).
                *   **Key Levels:** Identify significant support and resistance levels from the OHLC data.
                *   **News Sentiment:** Evaluate the overall sentiment from the provided news headlines (Positive, Negative, Neutral).
                *   **Trade Rationale:** Based on the above, explain WHY a BUY/SELL/WAIT signal is generated. Justify entry, stop loss, take profit, trade size, and why the **ATR-based stop** is appropriate. Explicitly justify 'use_trailing_stop'. Ensure Stop Loss is NOT placed *within* the range of the opening 5-minute candle; instead, aim for structural lows (e.g., below the 08:00 low for a BUY).
                *   **Risk/Reward:** Briefly state the estimated risk/reward for the proposed trade.
-            7. After the Chain-of-Thought, your final output MUST be strictly in the requested JSON format, and ONLY the JSON. Ensure the 'atr' field reflects the current ATR value provided in the market context.
+            8. After the Chain-of-Thought, your final output MUST be strictly in the requested JSON format, and ONLY the JSON. Ensure the 'atr' field reflects the current ATR value provided in the market context.
             """
 
     def analyze_market(

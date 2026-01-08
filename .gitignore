@@ -23,3 +23,6 @@ data
 
 # VIM
 *.swp
+
+prod-db
+prod-logs
