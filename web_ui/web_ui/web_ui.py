@@ -638,65 +638,71 @@ def index() -> rx.Component:
             ),
             rx.divider(),
             rx.heading("Recent Trades", size="5"),
-            # Mobile View (Cards)
-            rx.mobile_only(
-                rx.vstack(
-                    rx.foreach(State.trades, trade_mobile_card),
-                    width="100%",
-                    spacing="2",
-                )
-            ),
-            # Desktop/Tablet View (Table)
-            rx.tablet_and_desktop(
-                rx.table.root(
-                    rx.table.header(
-                        rx.table.row(
-                            rx.table.column_header_cell("Date"),
-                            rx.table.column_header_cell("Deal ID"),
-                            rx.table.column_header_cell("Epic"),
-                            rx.table.column_header_cell("Action"),
-                            rx.table.cell("PnL"),
-                            rx.table.cell("Outcome"),
-                            rx.table.cell("View"),
+            rx.table.root(
+                rx.table.header(
+                    rx.table.row(
+                        rx.table.column_header_cell("Date"),
+                        rx.table.column_header_cell(
+                            "Deal ID",
+                            display=rx.breakpoints(initial="none", sm="table-cell"),
                         ),
+                        rx.table.column_header_cell("Epic"),
+                        rx.table.column_header_cell(
+                            "Action",
+                            display=rx.breakpoints(initial="none", sm="table-cell"),
+                        ),
+                        rx.table.cell("PnL"),
+                        rx.table.cell(
+                            "Outcome",
+                            display=rx.breakpoints(initial="none", sm="table-cell"),
+                        ),
+                        rx.table.cell("View"),
                     ),
-                    rx.table.body(
-                        rx.foreach(
-                            State.trades,
-                            lambda trade: rx.table.row(
-                                rx.table.cell(
-                                    rx.moment(
-                                        trade["timestamp"], format="DD MMM, HH:mm"
-                                    )
-                                ),
-                                rx.table.cell(trade["deal_id"]),
-                                rx.table.cell(trade["epic_display"]),
-                                rx.table.cell(trade["action"]),
-                                rx.table.cell(
-                                    trade["pnl"],
-                                    color=rx.cond(
-                                        trade["pnl"].to(float) >= 0, "green", "red"
-                                    ),
-                                ),
-                                rx.table.cell(trade["outcome"]),
-                                rx.table.cell(
-                                    rx.button(
-                                        rx.icon("chart-line"),
-                                        size="1",
-                                        variant="ghost",
-                                        on_click=lambda: State.open_trade_detail(trade),
-                                    )
+                ),
+                rx.table.body(
+                    rx.foreach(
+                        State.trades,
+                        lambda trade: rx.table.row(
+                            rx.table.cell(
+                                rx.moment(trade["timestamp"], format="DD MMM, HH:mm")
+                            ),
+                            rx.table.cell(
+                                trade["deal_id"],
+                                display=rx.breakpoints(initial="none", sm="table-cell"),
+                            ),
+                            rx.table.cell(trade["epic_display"]),
+                            rx.table.cell(
+                                trade["action"],
+                                display=rx.breakpoints(initial="none", sm="table-cell"),
+                            ),
+                            rx.table.cell(
+                                trade["pnl"],
+                                color=rx.cond(
+                                    trade["pnl"].to(float) >= 0, "green", "red"
                                 ),
                             ),
-                        )
-                    ),
-                    width="100%",
-                )
+                            rx.table.cell(
+                                trade["outcome"],
+                                display=rx.breakpoints(initial="none", sm="table-cell"),
+                            ),
+                            rx.table.cell(
+                                rx.button(
+                                    rx.icon("chart-line"),
+                                    size="1",
+                                    variant="ghost",
+                                    on_click=lambda: State.open_trade_detail(trade),
+                                )
+                            ),
+                        ),
+                    )
+                ),
+                width="100%",
             ),
             spacing="4",  # Place spacing as the last keyword argument of rx.vstack
+            width="100%",  # Ensure vstack takes full width
         ),
         width="100%",
-        padding="2em",
+        padding=rx.breakpoints(initial="1em", sm="2em"),
     )
 
 
