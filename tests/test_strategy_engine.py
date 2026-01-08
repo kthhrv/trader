@@ -633,3 +633,28 @@ def test_generate_plan_session_context(mock_components):
     assert "Today's Low:  7400" in context_str
     # Calculation: (7415 - 7400) / (7500 - 7400) = 15/100 = 15%
     assert "Current Position in Range: 15%" in context_str
+
+
+def test_risk_scaling_logic(mock_components):
+    """
+    Verifies that the risk_scale parameter correctly influences position sizing.
+    """
+    mock_client, _, _, _, _, _, _ = mock_components
+
+    # Setup: Balance 10,000. Risk 1% = £100.
+    mock_client.get_account_info.return_value = pd.DataFrame(
+        {"accountId": ["TEST_ACC_ID"], "available": [10000.0]}
+    )
+
+    # 1. Scale 1.25 (Nasdaq case)
+    # Stop distance 100 pts.
+    # Expected size: (10000 * 0.01 * 1.25) / 100 = 125 / 100 = 1.25
+    engine_high = StrategyEngine("EPIC", risk_scale=1.25, ig_client=mock_client)
+    size_high = engine_high._calculate_size(7500, 7400)
+    assert size_high == 1.25
+
+    # 2. Scale 0.5 (Australia case)
+    # Expected size: (10000 * 0.01 * 0.5) / 100 = 50 / 100 = 0.5
+    engine_low = StrategyEngine("EPIC", risk_scale=0.5, ig_client=mock_client)
+    size_low = engine_low._calculate_size(7500, 7400)
+    assert size_low == 0.5
