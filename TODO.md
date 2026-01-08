@@ -6,7 +6,7 @@
         - `BREAKOUT` (Stop Entry): Buy if Price >= Level.
         - `PULLBACK` (Limit Entry): Buy if Price <= Level.
     - Fix logic in `StrategyEngine` to handle the conditional trigger direction correctly for Pullbacks.
-- [ ] **Session Context**: Pass `today_high` and `today_low` (Session Extremes) to the Gemini Analyst.
+- [x] **Session Context**: Pass `today_high` and `today_low` (Session Extremes) to the Gemini Analyst.
     - Goal: Prevent "Selling the Bottom" or "Buying the Top" traps.
 - [ ] **Granular Price History**: Include last 2 hours of **5-minute candles** in the AI prompt context.
     - Goal: Help AI see specific "wick rejections" that 15-minute candles hide.
