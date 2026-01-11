@@ -3,6 +3,8 @@ import signal
 import sys
 import argparse
 import warnings
+import subprocess
+import os  # Added os import
 import pandas as pd
 import pandas_ta as ta
 from datetime import datetime, timedelta
@@ -34,7 +36,6 @@ from src.scorecard import generate_scorecard
 from src.opportunity_analyzer import OpportunityAnalyzer
 from src.notification_service import HomeAssistantNotifier, HANotificationHandler
 
-import os
 
 warnings.simplefilter(action="ignore", category=FutureWarning)
 
@@ -55,6 +56,34 @@ logging.basicConfig(
     ],
 )
 logger = logging.getLogger(__name__)
+
+
+def get_version_info() -> str:
+    """
+    Returns the current code version.
+    Prioritizes GIT_COMMIT_SHA env var (for Docker), falls back to local git command.
+    """
+    # 1. Check Environment Variable (Production/Docker)
+    env_sha = os.getenv("GIT_COMMIT_SHA")
+    if env_sha:
+        return f"{env_sha[:7]} ({env_sha})"
+
+    # 2. Check Local Git (Development)
+    try:
+        full_hash = (
+            subprocess.check_output(["git", "rev-parse", "HEAD"])
+            .decode("ascii")
+            .strip()
+        )
+        short_hash = (
+            subprocess.check_output(["git", "rev-parse", "--short", "HEAD"])
+            .decode("ascii")
+            .strip()
+        )
+        return f"{short_hash} ({full_hash})"
+    except Exception:
+        return "Unknown Version"
+
 
 # Define market configurations once
 MARKET_CONFIGS = {
@@ -1223,6 +1252,10 @@ def main():
     # Register signal handlers
     signal.signal(signal.SIGINT, graceful_shutdown)
     signal.signal(signal.SIGTERM, graceful_shutdown)
+
+    # Log Startup Info
+    version = get_version_info()
+    logger.info(f"Trader Starting Up. Version: {version}")
 
     if args.test_alert:
         logger.info("Sending test alert to Home Assistant...")

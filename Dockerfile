@@ -43,6 +43,11 @@ COPY . .
 # Install the project itself
 RUN uv sync --frozen
 
+# Receive Git Commit SHA from build args
+# Placed here to prevent cache invalidation of previous steps
+ARG GIT_COMMIT_SHA
+ENV GIT_COMMIT_SHA=$GIT_COMMIT_SHA
+
 # Expose ports for Reflex UI
 EXPOSE 3000 8000
 
