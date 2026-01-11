@@ -3,9 +3,15 @@ import time
 from datetime import datetime, timedelta
 from typing import Dict, Optional
 from src.ig_client import IGClient
-from src.database import update_trade_outcome, update_trade_stop_loss
+from src.database import (
+    update_trade_outcome,
+    update_trade_stop_loss,
+    fetch_last_n_closed_trades,
+)
 from src.stream_manager import StreamManager  # New import
 from src.market_status import MarketStatus
+from src.notification_service import HomeAssistantNotifier
+from config import CONSECUTIVE_LOSS_LIMIT
 import threading  # New import
 import json  # New import
 
@@ -28,6 +34,7 @@ class TradeMonitorDB:
             polling_interval  # Polling interval for trailing stops if needed
         )
         self.market_status = market_status if market_status else MarketStatus()
+        self.notifier = HomeAssistantNotifier()
         self._active_monitors: Dict[
             str, threading.Event
         ] = {}  # {deal_id: threading.Event}
@@ -392,5 +399,28 @@ class TradeMonitorDB:
                 outcome=status,
                 db_path=self.db_path,
             )
+
+            # Check for consecutive losses
+            last_trades = fetch_last_n_closed_trades(
+                limit=CONSECUTIVE_LOSS_LIMIT, db_path=self.db_path
+            )
+            if len(last_trades) >= CONSECUTIVE_LOSS_LIMIT:
+                losses = [t for t in last_trades if t.get("pnl", 0) < 0]
+                if len(losses) == CONSECUTIVE_LOSS_LIMIT:
+                    logger.warning(
+                        f"{CONSECUTIVE_LOSS_LIMIT} Consecutive Losses Detected! Sending Notification."
+                    )
+                    msg = (
+                        f"⚠️ **Stop Trading Alert** ⚠️\n\n"
+                        f"The bot has recorded {CONSECUTIVE_LOSS_LIMIT} consecutive losses.\n"
+                        f"Last PnL: {pnl}\n"
+                        f"Please review strategy performance."
+                    )
+                    self.notifier.send_notification(
+                        title="Consecutive Losses Alert",
+                        message=msg,
+                        priority="high",
+                    )
+
         except Exception as e:
             logger.error(f"Failed to update trade outcome in DB: {e}")

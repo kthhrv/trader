@@ -224,6 +224,31 @@ def fetch_recent_trades(limit: int = 5, db_path=None):
         conn.close()
 
 
+def fetch_last_n_closed_trades(limit: int = 3, db_path=None):
+    """
+    Fetches the N most recently closed trades (where exit_time is not null).
+    """
+    conn = get_db_connection(db_path)
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            """
+            SELECT * FROM trade_log 
+            WHERE exit_time IS NOT NULL 
+            ORDER BY exit_time DESC 
+            LIMIT ?
+            """,
+            (limit,),
+        )
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+    except Exception as e:
+        logger.error(f"Failed to fetch last {limit} closed trades: {e}")
+        return []
+    finally:
+        conn.close()
+
+
 def fetch_all_trade_logs(db_path=None):
     """
     Fetches ALL trade log entries for scorecard analysis.

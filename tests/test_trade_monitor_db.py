@@ -148,6 +148,34 @@ class TestTradeMonitorDB(unittest.TestCase):
             "Monitor event should be set on CLOSED status",
         )
 
+    @patch("src.trade_monitor_db.fetch_last_n_closed_trades")
+    @patch("src.trade_monitor_db.update_trade_outcome")
+    @patch("src.trade_monitor_db.CONSECUTIVE_LOSS_LIMIT", 3)
+    def test_consecutive_losses_triggers_notification(
+        self, mock_update_db, mock_fetch_trades
+    ):
+        # Mock 3 consecutive losses
+        mock_fetch_trades.return_value = [
+            {"pnl": -10.0},
+            {"pnl": -20.0},
+            {"pnl": -15.0},
+        ]
+
+        # Mock notifier
+        self.monitor.notifier = MagicMock()
+
+        # Call _update_db with a loss
+        self.monitor._update_db("DEAL_LOSS", 100, -15.0, "time", "CLOSED")
+
+        # Verify notification sent
+        self.monitor.notifier.send_notification.assert_called_once()
+        args, kwargs = self.monitor.notifier.send_notification.call_args
+        self.assertEqual(kwargs["title"], "Consecutive Losses Alert")
+        self.assertEqual(kwargs["priority"], "high")
+
+        # Verify correct fetch limit was used
+        mock_fetch_trades.assert_called_with(limit=3, db_path=None)
+
     @patch("src.trade_monitor_db.time.sleep")
     @patch("src.trade_monitor_db.update_trade_outcome")
     def test_monitor_trade_forces_exit_near_market_close(
