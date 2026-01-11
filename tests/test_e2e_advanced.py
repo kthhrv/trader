@@ -212,9 +212,9 @@ def test_e2e_trailing_stop(advanced_mocks, caplog):
     args1 = mock_ig_client.update_open_position.call_args_list[0]
     assert args1[1]["stop_level"] == 7501.0  # Entry Price (Adjusted)
 
-    # Second update: Trailing (ATR 10 * 2 = 20. Price 7580 - 20 = 7560)
+    # Second update: Trailing (ATR 10 * 3 = 30. Price 7580 - 30 = 7550)
     args2 = mock_ig_client.update_open_position.call_args_list[1]
-    assert args2[1]["stop_level"] == 7560.0  # 7580 - 20
+    assert args2[1]["stop_level"] == 7550.0  # 7580 - 30 (Wider trail)
 
 
 def test_e2e_no_trailing_stop(advanced_mocks, caplog):

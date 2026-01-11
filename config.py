@@ -18,6 +18,7 @@ RISK_PER_TRADE_PERCENT = float(
 )  # Risk 1% of account balance per trade
 CONSECUTIVE_LOSS_LIMIT = int(os.getenv("CONSECUTIVE_LOSS_LIMIT", 4))
 MIN_ACCOUNT_BALANCE = float(os.getenv("MIN_ACCOUNT_BALANCE", 0.0))
+BREAKEVEN_TRIGGER_R = float(os.getenv("BREAKEVEN_TRIGGER_R", 1.5))
 
 # --- API Keys ---
 IG_API_KEY = os.getenv("IG_API_KEY")

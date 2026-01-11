@@ -80,6 +80,10 @@
 - **Config**: `web_ui/rxconfig.py`
 - **Run**: Typically via `reflex run` (or `run_ui.sh`).
 
+## Workflow & Safety
+- **Confirmation Required**: After presenting a plan for code changes or new features, **STOP** and wait for explicit user approval before executing any tool calls to modify the codebase.
+- **No Assumptions**: Do not assume approval for subsequent items in a list just because one was discussed.
+
 ### Outstanding Issues
 - **Liveness Monitoring**: we should have a 3rd party ping the system and alert me if non-reachable, non-healthy
 - **Error Alerting**: system should notify me of errors, not just crashes but Errors in the logs

@@ -11,7 +11,7 @@ from src.database import (
 from src.stream_manager import StreamManager  # New import
 from src.market_status import MarketStatus
 from src.notification_service import HomeAssistantNotifier
-from config import CONSECUTIVE_LOSS_LIMIT
+from config import CONSECUTIVE_LOSS_LIMIT, BREAKEVEN_TRIGGER_R
 import threading  # New import
 import json  # New import
 
@@ -245,16 +245,16 @@ class TradeMonitorDB:
                                 else (entry_price - current_price)
                             )
 
-                            # Rule 1: Breakeven at 1.5R
+                            # Rule 1: Breakeven at configured R Multiple
                             if not moved_to_breakeven and profit_dist >= (
-                                1.5 * risk_distance
+                                BREAKEVEN_TRIGGER_R * risk_distance
                             ):
                                 new_stop = entry_price
                                 if (direction == "BUY" and new_stop > current_stop) or (
                                     direction == "SELL" and new_stop < current_stop
                                 ):
                                     logger.info(
-                                        f"Moving Stop to BREAKEVEN for {deal_id}"
+                                        f"Moving Stop to BREAKEVEN for {deal_id} at {new_stop} (Trigger: {BREAKEVEN_TRIGGER_R}R)"
                                     )
                                     self.client.update_open_position(
                                         deal_id, stop_level=new_stop
@@ -268,13 +268,12 @@ class TradeMonitorDB:
                                     current_stop = new_stop  # Update local tracker
 
                             # Rule 2: Dynamic Trailing (ATR based)
-                            if profit_dist >= (
-                                1.5 * risk_distance
-                            ):  # Only trail if already in profit beyond breakeven
+                            if moved_to_breakeven:  # Only trail if already at breakeven
                                 if atr and atr > 0:
-                                    trail_dist = 2.0 * atr
+                                    # Use wider trail (3.0x ATR) once BE is reached to allow for more room
+                                    trail_dist = 3.0 * atr
                                 else:
-                                    trail_dist = 1.0 * risk_distance
+                                    trail_dist = 1.5 * risk_distance
 
                                 new_stop = (
                                     (current_price - trail_dist)
