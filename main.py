@@ -109,7 +109,6 @@ MARKET_CONFIGS = {
         },
         "timeout_seconds": 5400,
         "max_spread": 2.5,
-        "risk_scale": 1.25,  # Increased risk for high-performing market
     },
     "australia": {
         "epic": "IX.D.ASX.MONTH1.IP",
@@ -137,7 +136,6 @@ MARKET_CONFIGS = {
         },
         "timeout_seconds": 5400,
         "max_spread": 2.0,
-        "risk_scale": 1.25,  # Increased risk for high-performing market
     },
 }
 
