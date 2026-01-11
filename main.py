@@ -155,7 +155,7 @@ MARKET_CONFIGS = {
         },
         "timeout_seconds": 5400,
         "max_spread": 3.0,
-        "risk_scale": 0.5,  # Reduced risk due to low liquidity/high spread
+        "risk_scale": 1.0,
         "min_size": 0.5,
     },
     "us_tech": {
