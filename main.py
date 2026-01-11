@@ -99,6 +99,7 @@ MARKET_CONFIGS = {
         },
         "timeout_seconds": 5400,  # 90 minutes
         "max_spread": 2.0,
+        "min_size": 0.5,
     },
     "ny": {
         "epic": "IX.D.SPTRD.DAILY.IP",
@@ -112,6 +113,7 @@ MARKET_CONFIGS = {
         },
         "timeout_seconds": 5400,  # 90 minutes
         "max_spread": 1.6,
+        "min_size": 0.5,
     },
     "nikkei": {
         "epic": "IX.D.NIKKEI.DAILY.IP",
@@ -125,6 +127,7 @@ MARKET_CONFIGS = {
         },
         "timeout_seconds": 5400,  # 90 minutes
         "max_spread": 8.0,
+        "min_size": 0.5,
     },
     "germany": {
         "epic": "IX.D.DAX.DAILY.IP",
@@ -138,6 +141,7 @@ MARKET_CONFIGS = {
         },
         "timeout_seconds": 5400,
         "max_spread": 2.5,
+        "min_size": 0.5,
     },
     "australia": {
         "epic": "IX.D.ASX.MONTH1.IP",
@@ -152,6 +156,7 @@ MARKET_CONFIGS = {
         "timeout_seconds": 5400,
         "max_spread": 3.0,
         "risk_scale": 0.5,  # Reduced risk due to low liquidity/high spread
+        "min_size": 0.5,
     },
     "us_tech": {
         "epic": "IX.D.NASDAQ.CASH.IP",
@@ -165,6 +170,7 @@ MARKET_CONFIGS = {
         },
         "timeout_seconds": 5400,
         "max_spread": 2.0,
+        "min_size": 0.5,
     },
 }
 
@@ -978,12 +984,13 @@ def run_strategy(
     max_spread: float = 2.0,
     ignore_holidays: bool = False,
     risk_scale: float = 1.0,
+    min_size: float = 0.5,
 ):
     """
     Generic driver for a trading strategy on a specific epic.
     """
     logger.info(
-        f"--- STARTING {strategy_name} STRATEGY for {epic} (Dry Run: {dry_run}, Timeout: {timeout_seconds}s, Max Spread: {max_spread}, Risk Scale: {risk_scale}) ---"
+        f"--- STARTING {strategy_name} STRATEGY for {epic} (Dry Run: {dry_run}, Timeout: {timeout_seconds}s, Max Spread: {max_spread}, Risk Scale: {risk_scale}, Min Size: {min_size}) ---"
     )
 
     engine = StrategyEngine(
@@ -995,6 +1002,7 @@ def run_strategy(
         max_spread=max_spread,
         ignore_holidays=ignore_holidays,
         risk_scale=risk_scale,
+        min_size=min_size,
     )
 
     # 1. Generate Plan
@@ -1020,6 +1028,7 @@ def run_london_strategy(dry_run: bool = False, ignore_holidays: bool = False):
         max_spread=config["max_spread"],
         ignore_holidays=ignore_holidays,
         risk_scale=config.get("risk_scale", 1.0),
+        min_size=config.get("min_size", 0.5),
     )
 
 
@@ -1034,6 +1043,7 @@ def run_ny_strategy(dry_run: bool = False, ignore_holidays: bool = False):
         max_spread=config["max_spread"],
         ignore_holidays=ignore_holidays,
         risk_scale=config.get("risk_scale", 1.0),
+        min_size=config.get("min_size", 0.5),
     )
 
 
@@ -1048,6 +1058,7 @@ def run_nikkei_strategy(dry_run: bool = False, ignore_holidays: bool = False):
         max_spread=config["max_spread"],
         ignore_holidays=ignore_holidays,
         risk_scale=config.get("risk_scale", 1.0),
+        min_size=config.get("min_size", 0.5),
     )
 
 
@@ -1062,6 +1073,7 @@ def run_germany_strategy(dry_run: bool = False, ignore_holidays: bool = False):
         max_spread=config["max_spread"],
         ignore_holidays=ignore_holidays,
         risk_scale=config.get("risk_scale", 1.0),
+        min_size=config.get("min_size", 0.5),
     )
 
 
@@ -1076,6 +1088,7 @@ def run_australia_strategy(dry_run: bool = False, ignore_holidays: bool = False)
         max_spread=config["max_spread"],
         ignore_holidays=ignore_holidays,
         risk_scale=config.get("risk_scale", 1.0),
+        min_size=config.get("min_size", 0.5),
     )
 
 
@@ -1090,6 +1103,7 @@ def run_us_tech_strategy(dry_run: bool = False, ignore_holidays: bool = False):
         max_spread=config["max_spread"],
         ignore_holidays=ignore_holidays,
         risk_scale=config.get("risk_scale", 1.0),
+        min_size=config.get("min_size", 0.5),
     )
 
 

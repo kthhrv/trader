@@ -5,7 +5,7 @@ from datetime import datetime  # Added import
 from typing import Optional
 import pandas as pd
 import pandas_ta as ta
-from config import RISK_PER_TRADE_PERCENT
+from config import RISK_PER_TRADE_PERCENT, MIN_ACCOUNT_BALANCE
 from src.ig_client import IGClient
 from src.gemini_analyst import GeminiAnalyst, TradingSignal, Action, EntryType
 from src.news_fetcher import NewsFetcher
@@ -35,6 +35,7 @@ class StrategyEngine:
         market_status: Optional[MarketStatus] = None,
         stream_manager: Optional[StreamManager] = None,
         risk_scale: float = 1.0,
+        min_size: float = 0.5,
     ):
         """
         Orchestrates the trading workflow for a single instrument.
@@ -48,6 +49,7 @@ class StrategyEngine:
         self.max_spread = max_spread
         self.ignore_holidays = ignore_holidays
         self.risk_scale = risk_scale
+        self.min_size = min_size
 
         self.client = ig_client if ig_client else IGClient()
         self.analyst = analyst if analyst else GeminiAnalyst()
@@ -550,7 +552,10 @@ class StrategyEngine:
                             else float(val)
                         )
                 else:
-                    return 0.5
+                    logger.error(
+                        "Could not find target account in account list. Aborting."
+                    )
+                    return 0.0
             elif isinstance(all_accounts, dict) and "accounts" in all_accounts:
                 for acc in all_accounts["accounts"]:
                     if acc.get("accountId") == self.client.service.account_id:
@@ -561,27 +566,56 @@ class StrategyEngine:
                         break
 
             if balance <= 0:
-                return 0.5
-
-            # Apply Risk Scale (Default 1.0)
-            risk_amount = balance * RISK_PER_TRADE_PERCENT * self.risk_scale
-            if self.risk_scale != 1.0:
-                logger.info(
-                    f"Risk Scale applied: {self.risk_scale} -> Target Risk: £{risk_amount:.2f}"
-                )
+                return 0.0
 
             stop_distance = abs(entry - stop_loss)
-
             if stop_distance <= 0:
-                return 0.5
+                return 0.0
 
-            calculated_size = round(risk_amount / stop_distance, 2)
-            logger.info(f"Dynamic Sizing: Balance={balance}, Size={calculated_size}")
-            return calculated_size
+            # 1. Calculate Standard Risk Size (Unclamped)
+            target_risk_amount = balance * RISK_PER_TRADE_PERCENT * self.risk_scale
+            standard_size = round(target_risk_amount / stop_distance, 2)
+
+            # 2. Check if Standard Trade is safe for the Floor
+            # We check the actual risk of the standard 1% size
+            if (
+                MIN_ACCOUNT_BALANCE <= 0
+                or (balance - target_risk_amount) >= MIN_ACCOUNT_BALANCE
+            ):
+                # Standard is safe. But we must trade at least broker min.
+                effective_size = max(standard_size, self.min_size)
+
+                # RE-CHECK safety of the broker min if standard_size was smaller than it
+                if (balance - (effective_size * stop_distance)) >= MIN_ACCOUNT_BALANCE:
+                    logger.info(
+                        f"Dynamic Sizing: Balance={balance}, Size={effective_size} (Standard/Min)"
+                    )
+                    return effective_size
+
+            # 3. Standard Trade (or min required for standard) Breaches Floor.
+            # Drop immediately to Broker Minimum (if it wasn't already tried above).
+            logger.warning(
+                f"Standard Risk would breach Floor (£{MIN_ACCOUNT_BALANCE}). "
+                "Attempting step-down to Broker Minimum."
+            )
+
+            min_risk = self.min_size * stop_distance
+            if (balance - min_risk) >= MIN_ACCOUNT_BALANCE:
+                logger.info(
+                    f"Dynamic Sizing: Balance={balance}, Size={self.min_size} (Step-Down to Min)"
+                )
+                return self.min_size
+
+            # 4. Even Broker Minimum breaches the floor.
+            logger.warning(
+                f"Even Broker Minimum Risk (£{min_risk:.2f}) would breach Floor (£{MIN_ACCOUNT_BALANCE}). "
+                "Aborting trade."
+            )
+            return 0.0
 
         except Exception as e:
-            logger.error(f"Error calculating size: {e}. Defaulting to 0.5")
-            return 0.5
+            logger.error(f"Error calculating size: {e}. Defaulting to 0.0")
+            return 0.0
 
     def _place_market_order(
         self,
@@ -618,7 +652,21 @@ class StrategyEngine:
                 # Calculate size based on the ACTUAL entry (trigger_price) and the ADJUSTED stop loss
                 # This ensures total risk amount is constant.
                 size = self._calculate_size(trigger_price, adjusted_sl)
-                size = max(size, 0.04)
+
+                # Check for abort condition (Size too small)
+                if size <= 0:
+                    logger.warning(
+                        "Trade Aborted: Size is 0 (Risk/Floor limits reached)."
+                    )
+
+                    # Update DB to show we tried but aborted
+                    if self.active_plan_id:
+                        self.trade_logger.update_trade_status(
+                            row_id=self.active_plan_id,
+                            outcome="ABORTED_RISK",
+                            deal_id=None,
+                        )
+                    return False
 
             take_profit_level = plan.take_profit
             if plan.use_trailing_stop:
