@@ -385,132 +385,129 @@ class StrategyEngine:
                 return f"{parts[2]} Market News"
             return "Global Financial Markets"
 
-    def execute_strategy(self, timeout_seconds: int = 5400):
+    def execute_strategy(
+        self, timeout_seconds: int = 5400, collection_seconds: int = 14400
+    ):
         """
         Step 2: Monitoring loop. Triggers immediate entry on touch.
         Adjusts Stop Loss dynamically to maintain planned risk distance if slippage occurs.
+        Stops TRADING after `timeout_seconds`, but continues RECORDING DATA until `collection_seconds`.
         """
         if not self.active_plan:
             logger.info("SKIPPED: No active plan to execute.")
             return
 
         logger.info(
-            f"Starting execution monitor (Streaming price updates). Timeout in {timeout_seconds}s..."
+            f"Starting execution monitor (Streaming price updates). Trade Timeout: {timeout_seconds}s, Collection: {collection_seconds}s..."
         )
 
         start_time = time.time()
         last_log_time = start_time
         plan = self.active_plan
         decision_made = False  # Track if we've attempted a trade or rejected one
+        trading_active = True
 
         try:
             self.stream_manager.connect_and_subscribe(
                 self.epic, self._stream_price_update_handler
             )
 
-            while not self.position_open and not decision_made:
-                if (time.time() - start_time) > timeout_seconds:
-                    logger.info(
-                        f"Strategy for {self.epic} timed out after {timeout_seconds}s. No trade executed."
-                    )
-                    if self.active_plan_id and not self.position_open:
-                        # Only update to TIMED_OUT if we haven't already made a decision (like REJECTED_CHASE)
-                        self.trade_logger.update_trade_status(
-                            row_id=self.active_plan_id,
-                            outcome="TIMED_OUT",
-                            deal_id=None,
-                        )
-                    elif not self.active_plan_id:
-                        # Fallback: Log the timeout event to DB if no initial PENDING log exists
-                        self.trade_logger.log_trade(
-                            epic=self.epic,
-                            plan=self.active_plan,
-                            outcome="TIMED_OUT",
-                            spread_at_entry=0.0,
-                            is_dry_run=self.dry_run,
-                            deal_id=None,
-                            entry_type=self.active_plan.entry_type.value
-                            if self.active_plan.entry_type
-                            else "UNKNOWN",
-                        )
-                    decision_made = True
-                    break
+            # Main Loop: Runs until collection time expires or user interrupt
+            while (time.time() - start_time) < collection_seconds:
+                elapsed = time.time() - start_time
 
+                # --- Trading Logic (Only if within timeout and no decision yet) ---
+                if trading_active and not self.position_open and not decision_made:
+                    # Check for Trading Timeout
+                    if elapsed > timeout_seconds:
+                        logger.info(
+                            f"Strategy for {self.epic} TRADING timed out after {timeout_seconds}s. No trade executed. continuing data collection..."
+                        )
+                        if self.active_plan_id:
+                            self.trade_logger.update_trade_status(
+                                row_id=self.active_plan_id,
+                                outcome="TIMED_OUT",
+                                deal_id=None,
+                            )
+                        elif not self.active_plan_id:
+                            self.trade_logger.log_trade(
+                                epic=self.epic,
+                                plan=self.active_plan,
+                                outcome="TIMED_OUT",
+                                spread_at_entry=0.0,
+                                is_dry_run=self.dry_run,
+                                deal_id=None,
+                                entry_type=self.active_plan.entry_type.value
+                                if self.active_plan.entry_type
+                                else "UNKNOWN",
+                            )
+                        trading_active = False  # Stop looking for entry
+
+                    else:
+                        # --- Normal Trading Checks ---
+                        with self.price_lock:
+                            bid_snapshot = self.current_bid
+                            offer_snapshot = self.current_offer
+
+                        if bid_snapshot == 0 or offer_snapshot == 0:
+                            time.sleep(0.1)
+                            continue
+
+                        # Periodic Logging (Trading Phase)
+                        if time.time() - last_log_time > 10:
+                            wait_msg = ""
+                            if plan.action == Action.WAIT:
+                                wait_msg = "Monitoring Mode (WAIT)"
+                            else:
+                                if plan.action == Action.BUY:
+                                    wait_msg = f"Waiting BUY: Offer {offer_snapshot} >= {plan.entry}"
+                                elif plan.action == Action.SELL:
+                                    wait_msg = f"Waiting SELL: Bid {bid_snapshot} <= {plan.entry}"
+
+                            logger.info(
+                                f"MONITORING ({self.epic}): {wait_msg} | Current Bid/Offer: {bid_snapshot}/{offer_snapshot}"
+                            )
+                            last_log_time = time.time()
+
+                        # Spread Check & Trigger Logic (Same as before)
+                        current_spread = round(abs(offer_snapshot - bid_snapshot), 2)
+                        if plan.action != Action.WAIT:
+                            if current_spread > self.max_spread:
+                                if time.time() - self.last_skipped_log_time > 5:
+                                    # limit log spam
+                                    logger.info(
+                                        f"SKIPPED: Spread ({current_spread}) is wider than max allowed ({self.max_spread}). Holding off trigger."
+                                    )
+                                    self.last_skipped_log_time = time.time()
+                            else:
+                                triggered = False
+                                trigger_price = 0.0
+
+                                if plan.action == Action.BUY:
+                                    if offer_snapshot >= plan.entry:
+                                        triggered = True
+                                        trigger_price = offer_snapshot
+                                elif plan.action == Action.SELL:
+                                    if bid_snapshot <= plan.entry:
+                                        triggered = True
+                                        trigger_price = bid_snapshot
+
+                                if triggered:
+                                    self._place_market_order(
+                                        plan,
+                                        current_spread,
+                                        trigger_price,
+                                        dry_run=self.dry_run,
+                                    )
+                                    decision_made = True
+                                    trading_active = False  # Stop looking once executed
+
+                # --- End of Trading Logic ---
+
+                # Sleep briefly to spare CPU in the loop
                 time.sleep(0.1)
 
-                with self.price_lock:
-                    bid_snapshot = self.current_bid
-                    offer_snapshot = self.current_offer
-
-                if bid_snapshot == 0 or offer_snapshot == 0:
-                    continue
-
-                # Periodic Logging
-                current_time = time.time()
-                if current_time - last_log_time > 10:
-                    wait_msg = ""
-                    if plan.action == Action.WAIT:
-                        wait_msg = "Monitoring Mode (WAIT): Recording data only."
-                    else:
-                        if plan.action == Action.BUY:
-                            wait_msg = f"Waiting for BUY trigger: Offer {offer_snapshot} >= {plan.entry}"
-                        elif plan.action == Action.SELL:
-                            wait_msg = f"Waiting for SELL trigger: Bid {bid_snapshot} <= {plan.entry}"
-
-                    logger.info(
-                        f"MONITORING ({self.epic}): {wait_msg} | Current Bid/Offer: {bid_snapshot}/{offer_snapshot}"
-                    )
-                    last_log_time = current_time
-
-                # Spread Check
-                current_spread = round(abs(offer_snapshot - bid_snapshot), 2)
-                if plan.action == Action.WAIT:
-                    continue
-
-                if current_spread > self.max_spread:
-                    if current_time - self.last_skipped_log_time > 5:
-                        logger.info(
-                            f"SKIPPED: Spread ({current_spread}) is wider than max allowed ({self.max_spread}). Holding off trigger."
-                        )
-                        self.last_skipped_log_time = current_time
-                    continue
-
-                # Trigger Logic (Touch Entry)
-                triggered = False
-                trigger_price = 0.0
-
-                if plan.action == Action.BUY:
-                    if offer_snapshot >= plan.entry:
-                        triggered = True
-                        trigger_price = offer_snapshot
-                elif plan.action == Action.SELL:
-                    if bid_snapshot <= plan.entry:
-                        triggered = True
-                        trigger_price = bid_snapshot
-
-                if triggered:
-                    # Proceed to execution with the actual market price at trigger (slippage included)
-                    success = self._place_market_order(
-                        plan, current_spread, trigger_price, dry_run=self.dry_run
-                    )
-                    if not success:
-                        logger.warning(
-                            "Trade execution failed or was rejected internally."
-                        )
-                    decision_made = True
-                    break
-
-            # --- Post-Decision Data Recording ---
-            elapsed = time.time() - start_time
-            remaining = timeout_seconds - elapsed
-
-            if remaining > 0:
-                logger.info(
-                    f"Session active. Continuing to record market data for {remaining:.0f}s until timeout..."
-                )
-                while time.time() - start_time < timeout_seconds:
-                    time.sleep(5)
-                logger.info("Session timeout reached.")
+            logger.info("Data collection timeout reached.")
 
         except KeyboardInterrupt:
             logger.info("Execution stopped by user.")

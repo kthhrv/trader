@@ -127,13 +127,10 @@ def test_trade_lifecycle_flow(lifecycle_db):
 
         mock_stream.connect_and_subscribe.side_effect = mock_connect_and_subscribe
 
-        # We need to mock monitor_trade to STOP the engine loop,
-        # otherwise execute_strategy blocks forever (or until timeout).
-        # We verify monitor logic separately or in Phase 3.
         # Here we just want to verify the Transition to PLACED.
         monitor_db.monitor_trade = MagicMock()
 
-        engine.execute_strategy(timeout_seconds=1)
+        engine.execute_strategy(timeout_seconds=1, collection_seconds=2)
 
     # Verification 2: Check DB for LIVE_PLACED state
     row_2 = get_row_by_id(lifecycle_db, engine.active_plan_id)
@@ -226,7 +223,7 @@ def test_trade_lifecycle_timeout(lifecycle_db):
     mock_stream.connect_and_subscribe.return_value = None
 
     # Execute with very short timeout
-    engine.execute_strategy(timeout_seconds=0.1)
+    engine.execute_strategy(timeout_seconds=0.1, collection_seconds=0.2)
 
     # Verify DB update
     row_final = get_row_by_id(lifecycle_db, row_id)

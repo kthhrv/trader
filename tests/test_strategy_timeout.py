@@ -47,7 +47,8 @@ def test_timeout_logging(test_db):
     engine.active_plan_id = None
 
     # Run execution with a very short timeout
-    engine.execute_strategy(timeout_seconds=0.01)
+    # Set timeout < 0.1 (sleep duration) so it triggers on first iteration
+    engine.execute_strategy(timeout_seconds=0.05, collection_seconds=0.5)
 
     # Verify trade was logged as TIMED_OUT
     conn = get_db_connection(test_db)

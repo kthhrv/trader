@@ -285,7 +285,7 @@ def test_poll_market_triggers_buy(mock_components):
         patch("time.sleep", side_effect=trigger_update),
         patch("time.time", side_effect=mock_time),
     ):
-        engine.execute_strategy(timeout_seconds=5.0)
+        engine.execute_strategy(timeout_seconds=5.0, collection_seconds=10.0)
 
     assert engine.position_open is True
     mock_client.place_spread_bet_order.assert_called_once()
@@ -346,7 +346,7 @@ def test_poll_market_no_trigger(mock_components):
         patch("time.time", side_effect=mock_time),
         patch("time.sleep", return_value=None),
     ):
-        engine.execute_strategy(timeout_seconds=0.1)
+        engine.execute_strategy(timeout_seconds=0.1, collection_seconds=2.0)
 
     assert engine.position_open is False
     mock_client.place_spread_bet_order.assert_not_called()
@@ -396,7 +396,7 @@ def test_place_market_order_spread_too_wide(mock_components, caplog):
     current_time = [100.0]
 
     def mock_time():
-        current_time[0] += 0.5
+        current_time[0] += 0.001
         return current_time[0]
 
     def trigger_update(seconds):
@@ -413,7 +413,7 @@ def test_place_market_order_spread_too_wide(mock_components, caplog):
         patch("time.time", side_effect=mock_time),
         caplog.at_level(logging.INFO),
     ):
-        engine.execute_strategy(timeout_seconds=0.5)
+        engine.execute_strategy(timeout_seconds=5.0, collection_seconds=10.0)
 
     mock_client.place_spread_bet_order.assert_not_called()
     assert "SKIPPED: Spread (10.0) is wider than max allowed (1.0)" in caplog.text
@@ -481,7 +481,7 @@ def test_place_market_order_stop_too_tight(mock_components, caplog):
         patch("time.sleep", side_effect=trigger_update),
         patch("time.time", side_effect=mock_time),
     ):
-        engine.execute_strategy(timeout_seconds=0.5)
+        engine.execute_strategy(timeout_seconds=0.5, collection_seconds=2.0)
 
     mock_client.place_spread_bet_order.assert_called_once()
 
@@ -545,7 +545,7 @@ def test_place_market_order_dry_run(mock_components, caplog):
         patch("time.time", side_effect=mock_time),
         caplog.at_level(logging.INFO),
     ):
-        engine.execute_strategy(timeout_seconds=0.5)
+        engine.execute_strategy(timeout_seconds=0.5, collection_seconds=2.0)
 
     mock_client.place_spread_bet_order.assert_not_called()
     assert "DRY RUN: BUY 1.0 EPIC at 7500.0 (Stop: 7449.0)" in caplog.text

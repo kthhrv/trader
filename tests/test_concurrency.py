@@ -144,7 +144,10 @@ def test_concurrent_trades(mock_sleep, temp_db_path, caplog):
     london_engine.generate_plan()
     london_thread = Thread(
         target=london_engine.execute_strategy,
-        kwargs={"timeout_seconds": 5},
+        kwargs={
+            "timeout_seconds": 5,
+            "collection_seconds": 15,
+        },  # Short collection for test
         daemon=True,
     )
     london_thread.start()
@@ -161,7 +164,9 @@ def test_concurrent_trades(mock_sleep, temp_db_path, caplog):
     logger.info("--- Starting NY Strategy ---")
     ny_engine.generate_plan()
     ny_thread = Thread(
-        target=ny_engine.execute_strategy, kwargs={"timeout_seconds": 5}, daemon=True
+        target=ny_engine.execute_strategy,
+        kwargs={"timeout_seconds": 5, "collection_seconds": 15},
+        daemon=True,
     )
     ny_thread.start()
     time.sleep(0.2)

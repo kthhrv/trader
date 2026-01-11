@@ -114,7 +114,9 @@ def test_e2e_trailing_stop(advanced_mocks, caplog):
     from threading import Thread
 
     trade_execution_thread = Thread(
-        target=engine.execute_strategy, kwargs={"timeout_seconds": 4.0}, daemon=True
+        target=engine.execute_strategy,
+        kwargs={"timeout_seconds": 4.0, "collection_seconds": 5},
+        daemon=True,
     )
     trade_execution_thread.start()
     time.sleep(0.1)
@@ -268,7 +270,9 @@ def test_e2e_no_trailing_stop(advanced_mocks, caplog):
     from threading import Thread
 
     trade_execution_thread = Thread(
-        target=engine.execute_strategy, kwargs={"timeout_seconds": 4.0}, daemon=True
+        target=engine.execute_strategy,
+        kwargs={"timeout_seconds": 4.0, "collection_seconds": 5},
+        daemon=True,
     )
     trade_execution_thread.start()
     time.sleep(0.1)

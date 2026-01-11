@@ -184,7 +184,8 @@ def test_e2e_trading_flow(e2e_mocks, caplog):
         patch("src.trade_monitor_db.time.sleep", side_effect=fast_sleep),
     ):
         trade_execution_thread = Thread(
-            target=engine.execute_strategy, kwargs={"timeout_seconds": 3.0}
+            target=engine.execute_strategy,
+            kwargs={"timeout_seconds": 3.0, "collection_seconds": 5},
         )
         trade_execution_thread.start()
 

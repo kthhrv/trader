@@ -1010,7 +1010,9 @@ def run_strategy(
 
     # 2. Execute if plan exists
     if engine.active_plan:
-        engine.execute_strategy(timeout_seconds=timeout_seconds)
+        engine.execute_strategy(
+            timeout_seconds=timeout_seconds, collection_seconds=14400
+        )
     else:
         logger.info("No actionable plan generated. Execution finished.")
 
