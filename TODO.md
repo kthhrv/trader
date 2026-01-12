@@ -20,6 +20,9 @@
     - Add `trigger_price` column to `trade_log` table.
     - Log the *planned* entry price separately from the *execution* price (which includes slippage).
     - Update `main.py` reporting to show "Entry vs Trigger".
+- [ ] **Structured Logging**:
+    - Implement `logging.LoggerAdapter` in `StrategyEngine`.
+    - Prefix all trade-specific logs with `[DB:<id>]` for better traceability during concurrent strategy execution.
 
 ## UI Improvements
 - [ ] **Trade Detail Chart**: Add "Trigger Price" line if available.

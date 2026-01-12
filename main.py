@@ -132,7 +132,7 @@ MARKET_CONFIGS = {
     "germany": {
         "epic": "IX.D.DAX.DAILY.IP",
         "strategy_name": "DAX OPEN",
-        "news_query": "DAX 40 German Economy",
+        "news_query": "DAX 40 Germany Economy",
         "schedule": {
             "day_of_week": "mon-fri",
             "hour": 7,
@@ -1227,6 +1227,12 @@ def main():
     parser.add_argument(
         "--verbose", "-v", action="store_true", help="Print live prices to console"
     )
+    parser.add_argument(
+        "--source",
+        type=str,
+        choices=["google", "yahoo"],
+        help="Specific news source to use (google or yahoo).",
+    )
 
     market_group = parser.add_mutually_exclusive_group()
     market_group.add_argument(
@@ -1367,22 +1373,24 @@ def main():
     if args.news_only:
         fetcher = NewsFetcher()
         query = None
+        market_key = None
 
         if args.news_query:
             query = args.news_query
         elif args.market:
             query = MARKET_CONFIGS[args.market]["news_query"]
+            market_key = args.market
         elif args.epic:
             query = args.epic
 
         if query:
-            print(fetcher.fetch_news(query))
+            print(fetcher.fetch_news(query, source=args.source, market=market_key))
         else:
             logger.error("No query provided. Use --market, --news-query, or --epic.")
         return
 
     if args.news_check:
-        logger.info("Running News Health Check for all markets...")
+        logger.info("Running News Health Check...")
         fetcher = NewsFetcher()
         analyst = GeminiAnalyst() if args.with_rating else None
 
@@ -1395,11 +1403,23 @@ def main():
         passed = 0
         failed = 0
 
-        for market, config in MARKET_CONFIGS.items():
+        # Filter markets if --market is provided
+        target_markets = MARKET_CONFIGS.items()
+        if args.market:
+            if args.market in MARKET_CONFIGS:
+                target_markets = [(args.market, MARKET_CONFIGS[args.market])]
+            else:
+                logger.error(f"Unknown market: {args.market}")
+                return
+
+        for market, config in target_markets:
             query = config["news_query"]
             print(f"\nChecking [{market.upper()}] Query: '{query}'...")
             try:
-                result = fetcher.fetch_news(query, limit=3)
+                # Increase limit to 10 for deep audit (Strategy uses 5 by default)
+                result = fetcher.fetch_news(
+                    query, limit=10, source=args.source, market=market
+                )
                 if "No recent news found" in result:
                     print("  [WARN] No news returned.")
                     failed += 1
