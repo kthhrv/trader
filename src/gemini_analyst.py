@@ -1,11 +1,15 @@
-from google import genai
-from google.genai import types
-import typing_extensions as typing
-from pydantic import BaseModel, Field
-from enum import Enum
 import json
+import logging
 import pandas as pd
+import typing_extensions as typing
+from enum import Enum
+from google import genai
+from google.genai import errors, types
+from pydantic import BaseModel, Field
+
 from config import GEMINI_API_KEY
+
+logger = logging.getLogger(__name__)
 
 
 class Action(str, Enum):
@@ -104,7 +108,9 @@ class GeminiAnalyst:
             """
 
     def analyze_market(
-        self, market_data_context: str, strategy_name: str = "Market Open"
+        self,
+        market_data_context: str,
+        strategy_name: str = "Market Open",
     ) -> typing.Optional[TradingSignal]:
         """
         Sends market data to Gemini and returns a structured TradingSignal.
@@ -123,6 +129,10 @@ class GeminiAnalyst:
             )
 
             # The SDK with response_schema automatically handles the schema enforcement
+            if not response.text:
+                logger.error("Gemini returned empty response text.")
+                return None
+
             signal_data = json.loads(response.text)
             # Handle potential missing entry_type from older models or if omitted (default fallback)
             if "entry_type" not in signal_data:
@@ -133,12 +143,25 @@ class GeminiAnalyst:
                 )
             return TradingSignal(**signal_data)
 
+        except errors.ClientError as e:
+            logger.error(f"Gemini Client Error (4xx): {e}")
+            return None
+        except errors.ServerError as e:
+            logger.error(f"Gemini Server Error (5xx): {e}")
+            return None
+        except errors.APIError as e:
+            logger.error(
+                f"Gemini API Error: {e} (Code: {e.code if hasattr(e, 'code') else 'N/A'})"
+            )
+            return None
         except Exception as e:
-            print(f"Error during Gemini analysis: {e}")
+            logger.error(f"Unexpected error during Gemini analysis: {e}")
             return None
 
     def assess_news_quality(
-        self, news_text: str, market_name: str
+        self,
+        news_text: str,
+        market_name: str,
     ) -> typing.Optional[NewsQuality]:
         """
         Asks Gemini to rate the quality and relevance of the fetched news for a specific market.
@@ -170,14 +193,20 @@ class GeminiAnalyst:
                 ),
             )
 
+            if not response.text:
+                logger.error("Gemini returned empty response for news assessment.")
+                return None
+
             return NewsQuality(**json.loads(response.text))
 
         except Exception as e:
-            print(f"Error during news assessment: {e}")
+            logger.error(f"Error during news assessment: {e}")
             return None
 
     def generate_post_mortem(
-        self, trade_data: dict, price_history_df: pd.DataFrame = None
+        self,
+        trade_data: dict,
+        price_history_df: pd.DataFrame = None,
     ) -> str:
         """
         Generates a post-mortem analysis for a completed trade.
@@ -339,7 +368,7 @@ class GeminiAnalyst:
                 return "No candidates returned from Gemini."
 
         except Exception as e:
-            print(f"Gemini Post-Mortem Error: {e}")
+            logger.error(f"Gemini Post-Mortem Error: {e}")
             return "Analysis failed."
 
 
