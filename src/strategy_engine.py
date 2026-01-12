@@ -291,10 +291,10 @@ class StrategyEngine:
                     )
                 logger.info(f"reasoning: {signal.reasoning}")
             else:
-                logger.warning("PLAN RESULT: Gemini signal generation failed.")
+                logger.error("PLAN RESULT: Gemini signal generation failed.")
                 error_signal = TradingSignal(
                     ticker=self.epic,
-                    action=Action.WAIT,
+                    action=Action.ERROR,
                     entry=0.0,
                     stop_loss=0.0,
                     take_profit=0.0,

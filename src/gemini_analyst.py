@@ -16,6 +16,7 @@ class Action(str, Enum):
     BUY = "BUY"
     SELL = "SELL"
     WAIT = "WAIT"
+    ERROR = "ERROR"
 
 
 class EntryType(str, Enum):
