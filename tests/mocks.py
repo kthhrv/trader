@@ -12,6 +12,23 @@ class MockIGClient:
         self.service.account_id = "TEST_ACC_ID"
         self.service.account_type = "SPREADBET"
 
+        # Mock data_service (alias to service for simplicity, or separate mock)
+        self.data_service = self.service
+
+        # Mock fetch_market_by_epic (used for marketId lookup)
+        self.data_service.fetch_market_by_epic = MagicMock(
+            return_value={"instrument": {"marketId": "MOCK_MARKET_ID"}}
+        )
+        self.service.fetch_market_by_epic = self.data_service.fetch_market_by_epic
+
+        # Mock fetch_client_sentiment_by_instrument
+        self.data_service.fetch_client_sentiment_by_instrument = MagicMock(
+            return_value={
+                "longPositionPercentage": 60.0,
+                "shortPositionPercentage": 40.0,
+            }
+        )
+
         # Default mock for fetch_historical_data (used by generate_plan)
         self.historical_data_df = self._create_mock_historical_data()
         self.fetch_historical_data = MagicMock(return_value=self.historical_data_df)

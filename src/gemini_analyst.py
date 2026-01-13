@@ -105,7 +105,12 @@ class GeminiAnalyst:
                *   **News Sentiment:** Evaluate the overall sentiment from the provided news headlines (Positive, Negative, Neutral).
                *   **Trade Rationale:** Based on the above, explain WHY a BUY/SELL/WAIT signal is generated. Justify entry, stop loss, take profit, trade size, and why the **ATR-based stop** is appropriate. Explicitly justify 'use_trailing_stop'. Ensure Stop Loss is NOT placed *within* the range of the opening 5-minute candle; instead, aim for structural lows (e.g., below the 08:00 low for a BUY).
                *   **Risk/Reward:** Briefly state the estimated risk/reward for the proposed trade.
-            8. After the Chain-of-Thought, your final output MUST be strictly in the requested JSON format, and ONLY the JSON. Ensure the 'atr' field reflects the current ATR value provided in the market context.
+            8. **Sentiment Analysis (Contrarian):**
+               - Use 'Client Sentiment' as a **Contrarian Indicator**.
+               - If >70% of retail clients are **LONG**, be cautious about buying (Crowded Trade). Prefer mean reversion or waits.
+               - If >70% of retail clients are **SHORT**, look for Short Squeezes (Bullish Breakouts).
+               - If sentiment is neutral (40-60%), rely purely on Technicals.
+            9. After the Chain-of-Thought, your final output MUST be strictly in the requested JSON format, and ONLY the JSON. Ensure the 'atr' field reflects the current ATR value provided in the market context.
             """
 
     def analyze_market(

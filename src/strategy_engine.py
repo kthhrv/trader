@@ -1,7 +1,7 @@
 import logging
 import time
 import threading
-from datetime import datetime  # Added import
+from datetime import datetime, timezone  # Added timezone
 from typing import Optional
 import pandas as pd
 import pandas_ta as ta
@@ -162,7 +162,8 @@ class StrategyEngine:
             gap_str = f"{gap_percent:+.2f}%"
 
             # 3. Format Data for Gemini
-            market_context = f"Instrument: {self.epic}\n"
+            market_context = f"Current Time (UTC): {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}\n"
+            market_context += f"Instrument: {self.epic}\n"
 
             if not df_daily.empty:
                 market_context += "\n--- Daily OHLC Data (Last 10 Days) ---\n"
@@ -209,6 +210,41 @@ class StrategyEngine:
                         market_context += f"VIX Level: {vix_bid} (Market Fear Index)\n"
             except Exception as e:
                 logger.warning(f"Failed to fetch VIX data: {e}")
+
+            # --- Client Sentiment (Contrarian Indicator) ---
+            try:
+                # 1. Get Market ID (Required for sentiment lookup)
+                market_details = self.client.data_service.fetch_market_by_epic(
+                    self.epic
+                )
+                if market_details and "instrument" in market_details:
+                    market_id = market_details["instrument"]["marketId"]
+
+                    # 2. Fetch Sentiment from LIVE Data Service (to avoid Demo inversions)
+                    sentiment = (
+                        self.client.data_service.fetch_client_sentiment_by_instrument(
+                            market_id
+                        )
+                    )
+
+                    if sentiment:
+                        long_pct = float(sentiment.get("longPositionPercentage", 0))
+                        short_pct = float(sentiment.get("shortPositionPercentage", 0))
+
+                        signal_hint = "NEUTRAL"
+                        if long_pct > 70:
+                            signal_hint = "BEARISH CONTRA (Retail is Crowded Long)"
+                        elif short_pct > 70:
+                            signal_hint = "BULLISH CONTRA (Retail is Crowded Short)"
+
+                        market_context += (
+                            "\n--- Client Sentiment (IG Markets - % of Accounts) ---\n"
+                        )
+                        market_context += f"Long: {long_pct}%\n"
+                        market_context += f"Short: {short_pct}%\n"
+                        market_context += f"Signal Implication: {signal_hint}\n"
+            except Exception as e:
+                logger.warning(f"Failed to fetch Client Sentiment: {e}")
 
             # 4. Fetch News
             query = (
