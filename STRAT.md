@@ -17,13 +17,15 @@ We trade high-liquidity indices during their specific "Open" windows (first 90 m
 *   **Stop Loss:**
     *   **Structural:** Must be placed beyond key technical levels (Swing High/Low, EMA).
     *   **Volatility Based:** Minimum distance of **1.5x to 2.0x ATR**.
+    *   **Pre-Open Safety:** For entries near the open (e.g., HH:55), the Stop **MUST** clear the *entire* session high/low volatility structure to survive the opening flush.
     *   **Spread Adjusted:** The calculated Stop Loss is **widened** by the current market spread at the moment of execution to prevent "bid/ask" stop-outs.
 *   **Dynamic Sizing:** Position size is calculated *after* the Stop Loss is determined to ensure the monetary risk (£) remains constant regardless of stop distance.
 
 ## 3. Entry Logic (The "Gas")
 *   **Trigger Type:** **INSTANT (Touch)**.
-    *   *Logic:* We place "Market if Touched" orders. We do not wait for candle closes (currently), prioritizing entry speed to catch momentum.
+    *   *Logic:* We place "Market if Touched" orders. We do not wait for candle closes, prioritizing entry speed to catch momentum.
 *   **Setup:** Breakout of Pre-Market Range or Opening Range.
+*   **Extension Rule (No Chasing):** Do NOT enter a trade if the entry price is more than **1.5x ATR** away from the 20-period EMA. Wait for a pullback or skip.
 *   **Context Awareness (AI):**
     *   **Session Extremes:** The AI is given `Today's High` and `Today's Low`.
     *   **Rule:** "Do NOT Buy the High / Sell the Low" unless volatility is high (Breakout).

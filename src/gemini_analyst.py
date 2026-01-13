@@ -95,12 +95,14 @@ class GeminiAnalyst:
 
             ### 2. Trading Rules (Strict)
             - **Direction:** Trade WITH the momentum (Open > EMA20 = Bullish bias, unless overextended).
+            - **Extension Rule (No Chasing):** Do NOT recommend a trade if the entry price is more than **1.5x ATR** away from the 20-period EMA. Wait for a pullback or return 'WAIT'.
             - **Entry:** MUST be a specific price level where the "Wave" begins (e.g., break of Pre-Market High/Low).
             - **Stop Loss (Risk):**
                 - MUST be structural (below Swing Low / above Swing High).
                 - **MINIMUM DISTANCE:** 1.5x to 2.0x current ATR. (If structural stop is tighter, WIDEN it to meet this minimum).
                 - **MAXIMUM DISTANCE:** 5.0x ATR (If structural stop is wider, reduce position size or WAIT).
-            - **Take Profit:**
+                - **Pre-Open Safety:** For entries near the open (e.g., HH:55), the Stop **MUST** clear the *entire* session high/low volatility structure to survive the opening flush.
+            - **Take Profit / Management:**
                 - **Trend Days:** Use `use_trailing_stop=True` for uncapped upside.
                 - **Range Days:** Use `use_trailing_stop=False` and target a fixed Resistance/Support level (R:R > 1.5).
 
