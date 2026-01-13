@@ -35,7 +35,8 @@ class StrategyEngine:
         market_status: Optional[MarketStatus] = None,
         stream_manager: Optional[StreamManager] = None,
         risk_scale: float = 1.0,
-        min_size: float = 0.5,
+        min_size: float = 0.01,
+        model_name: str = "gemini-3-flash-preview",
     ):
         """
         Orchestrates the trading workflow for a single instrument.
@@ -50,9 +51,10 @@ class StrategyEngine:
         self.ignore_holidays = ignore_holidays
         self.risk_scale = risk_scale
         self.min_size = min_size
+        self.model_name = model_name
 
         self.client = ig_client if ig_client else IGClient()
-        self.analyst = analyst if analyst else GeminiAnalyst()
+        self.analyst = analyst if analyst else GeminiAnalyst(model_name=self.model_name)
         self.news_fetcher = news_fetcher if news_fetcher else NewsFetcher()
         self.market_status = market_status if market_status else MarketStatus()
         self.trade_logger = trade_logger if trade_logger else TradeLoggerDB()

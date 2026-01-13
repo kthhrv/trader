@@ -73,7 +73,7 @@ class TradingSignal(BaseModel):
 
 
 class GeminiAnalyst:
-    def __init__(self, model_name: str = "gemini-3-pro-preview"):
+    def __init__(self, model_name: str = "gemini-3-flash-preview"):
         """
         Initializes the Gemini Analyst with a Vertex AI model, using the google-genai SDK.
         """

@@ -585,11 +585,11 @@ def run_list_active_trades():
     print(f"{'=' * 100}\n")
 
 
-def run_post_mortem(deal_id: str):
+def run_post_mortem(deal_id: str, model_name: str = "gemini-3-flash-preview"):
     """
     Runs a post-mortem analysis for a specific deal ID.
     """
-    logger.info(f"Starting Post-Mortem for Deal ID: {deal_id}")
+    logger.info(f"Starting Post-Mortem for Deal ID: {deal_id} using {model_name}")
 
     # 1. Fetch Data
     trade_data = fetch_trade_data(deal_id)
@@ -624,7 +624,7 @@ def run_post_mortem(deal_id: str):
         logger.warning(f"Failed to fetch historical price context for post-mortem: {e}")
 
     # 3. Analyze with Gemini
-    analyst = GeminiAnalyst()
+    analyst = GeminiAnalyst(model_name=model_name)
     report = analyst.generate_post_mortem(trade_data, price_history_df=price_history_df)
 
     # 4. Save and Print
@@ -985,12 +985,13 @@ def run_strategy(
     ignore_holidays: bool = False,
     risk_scale: float = 1.0,
     min_size: float = 0.01,
+    model_name: str = "gemini-3-flash-preview",
 ):
     """
     Generic driver for a trading strategy on a specific epic.
     """
     logger.info(
-        f"--- STARTING {strategy_name} STRATEGY for {epic} (Dry Run: {dry_run}, Timeout: {timeout_seconds}s, Max Spread: {max_spread}, Risk Scale: {risk_scale}, Min Size: {min_size}) ---"
+        f"--- STARTING {strategy_name} STRATEGY for {epic} (Model: {model_name}, Dry Run: {dry_run}, Timeout: {timeout_seconds}s) ---"
     )
 
     engine = StrategyEngine(
@@ -1003,6 +1004,7 @@ def run_strategy(
         ignore_holidays=ignore_holidays,
         risk_scale=risk_scale,
         min_size=min_size,
+        model_name=model_name,
     )
 
     # 1. Generate Plan
@@ -1019,7 +1021,11 @@ def run_strategy(
     logger.info(f"--- {strategy_name} STRATEGY COMPLETED ---")
 
 
-def run_london_strategy(dry_run: bool = False, ignore_holidays: bool = False):
+def run_london_strategy(
+    dry_run: bool = False,
+    ignore_holidays: bool = False,
+    model_name: str = "gemini-3-flash-preview",
+):
     config = MARKET_CONFIGS["london"]
     run_strategy(
         config["epic"],
@@ -1031,10 +1037,15 @@ def run_london_strategy(dry_run: bool = False, ignore_holidays: bool = False):
         ignore_holidays=ignore_holidays,
         risk_scale=config.get("risk_scale", 1.0),
         min_size=config.get("min_size", 0.01),
+        model_name=model_name,
     )
 
 
-def run_ny_strategy(dry_run: bool = False, ignore_holidays: bool = False):
+def run_ny_strategy(
+    dry_run: bool = False,
+    ignore_holidays: bool = False,
+    model_name: str = "gemini-3-flash-preview",
+):
     config = MARKET_CONFIGS["ny"]
     run_strategy(
         config["epic"],
@@ -1046,10 +1057,15 @@ def run_ny_strategy(dry_run: bool = False, ignore_holidays: bool = False):
         ignore_holidays=ignore_holidays,
         risk_scale=config.get("risk_scale", 1.0),
         min_size=config.get("min_size", 0.01),
+        model_name=model_name,
     )
 
 
-def run_nikkei_strategy(dry_run: bool = False, ignore_holidays: bool = False):
+def run_nikkei_strategy(
+    dry_run: bool = False,
+    ignore_holidays: bool = False,
+    model_name: str = "gemini-3-flash-preview",
+):
     config = MARKET_CONFIGS["nikkei"]
     run_strategy(
         config["epic"],
@@ -1061,10 +1077,15 @@ def run_nikkei_strategy(dry_run: bool = False, ignore_holidays: bool = False):
         ignore_holidays=ignore_holidays,
         risk_scale=config.get("risk_scale", 1.0),
         min_size=config.get("min_size", 0.01),
+        model_name=model_name,
     )
 
 
-def run_germany_strategy(dry_run: bool = False, ignore_holidays: bool = False):
+def run_germany_strategy(
+    dry_run: bool = False,
+    ignore_holidays: bool = False,
+    model_name: str = "gemini-3-flash-preview",
+):
     config = MARKET_CONFIGS["germany"]
     run_strategy(
         config["epic"],
@@ -1076,10 +1097,15 @@ def run_germany_strategy(dry_run: bool = False, ignore_holidays: bool = False):
         ignore_holidays=ignore_holidays,
         risk_scale=config.get("risk_scale", 1.0),
         min_size=config.get("min_size", 0.01),
+        model_name=model_name,
     )
 
 
-def run_australia_strategy(dry_run: bool = False, ignore_holidays: bool = False):
+def run_australia_strategy(
+    dry_run: bool = False,
+    ignore_holidays: bool = False,
+    model_name: str = "gemini-3-flash-preview",
+):
     config = MARKET_CONFIGS["australia"]
     run_strategy(
         config["epic"],
@@ -1091,10 +1117,15 @@ def run_australia_strategy(dry_run: bool = False, ignore_holidays: bool = False)
         ignore_holidays=ignore_holidays,
         risk_scale=config.get("risk_scale", 1.0),
         min_size=config.get("min_size", 0.01),
+        model_name=model_name,
     )
 
 
-def run_us_tech_strategy(dry_run: bool = False, ignore_holidays: bool = False):
+def run_us_tech_strategy(
+    dry_run: bool = False,
+    ignore_holidays: bool = False,
+    model_name: str = "gemini-3-flash-preview",
+):
     config = MARKET_CONFIGS["us_tech"]
     run_strategy(
         config["epic"],
@@ -1106,6 +1137,7 @@ def run_us_tech_strategy(dry_run: bool = False, ignore_holidays: bool = False):
         ignore_holidays=ignore_holidays,
         risk_scale=config.get("risk_scale", 1.0),
         min_size=config.get("min_size", 0.01),
+        model_name=model_name,
     )
 
 
@@ -1127,6 +1159,11 @@ def update_heartbeat():
 
 def main():
     parser = argparse.ArgumentParser(description="AI Market Open Trader")
+    parser.add_argument(
+        "--analyst",
+        action="store_true",
+        help="Generate and print the trading plan for a specific market without executing (requires --market).",
+    )
     parser.add_argument(
         "--now", action="store_true", help="Run the strategy immediately and exit"
     )
@@ -1232,6 +1269,12 @@ def main():
         type=str,
         choices=["google", "yahoo"],
         help="Specific news source to use (google or yahoo).",
+    )
+    parser.add_argument(
+        "--model",
+        type=str,
+        default="gemini-3-flash-preview",
+        help="Gemini model name to use (e.g., gemini-1.5-flash).",
     )
 
     market_group = parser.add_mutually_exclusive_group()
@@ -1339,7 +1382,7 @@ def main():
         return
 
     if args.post_mortem:
-        run_post_mortem(args.post_mortem)
+        run_post_mortem(args.post_mortem, model_name=args.model)
         return
 
     if args.monitor_trade:
@@ -1392,7 +1435,7 @@ def main():
     if args.news_check:
         logger.info("Running News Health Check...")
         fetcher = NewsFetcher()
-        analyst = GeminiAnalyst() if args.with_rating else None
+        analyst = GeminiAnalyst(model_name=args.model) if args.with_rating else None
 
         print(f"\n{'=' * 80}")
         print(f"{'NEWS HEALTH CHECK':^80}")
@@ -1454,6 +1497,52 @@ def main():
         print(f"\nSummary: {passed} Passed, {failed} Failed.")
         return
 
+    if args.analyst:
+        if not args.market:
+            logger.error("--analyst requires --market to be specified.")
+            return
+
+        logger.info(f"Running Analyst Mode for {args.market.upper()}...")
+        config = MARKET_CONFIGS[args.market]
+
+        # Initialize Engine
+        engine = StrategyEngine(
+            config["epic"],
+            strategy_name=config["strategy_name"],
+            news_query=config["news_query"],
+            dry_run=True,  # Safety: Force dry run for analyst mode
+            verbose=args.verbose,
+            max_spread=config["max_spread"],
+            ignore_holidays=args.holiday_season_override,
+            risk_scale=config.get("risk_scale", 1.0),
+            min_size=config.get("min_size", 0.01),
+            model_name=args.model,
+        )
+
+        # Generate Plan
+        engine.generate_plan()
+
+        # Print Result
+        print(f"\n{'=' * 60}")
+        print(f"ANALYST REPORT: {config['strategy_name']}")
+        print(f"{'=' * 60}")
+
+        if engine.active_plan:
+            plan = engine.active_plan
+            print(f"Action:      {plan.action}")
+            print(f"Entry:       {plan.entry} ({plan.entry_type})")
+            print(f"Stop Loss:   {plan.stop_loss}")
+            print(f"Take Profit: {plan.take_profit}")
+            print(f"Size:        {plan.size}")
+            print(f"Confidence:  {plan.confidence}")
+            print(f"{'-' * 60}")
+            print(f"Reasoning:\n{plan.reasoning}")
+        else:
+            print("No plan generated. (See logs for details/errors)")
+
+        print(f"{'=' * 60}\n")
+        return
+
     if args.now:
         logger.info("Executing ON-DEMAND strategy...")
         if args.market:
@@ -1468,6 +1557,7 @@ def main():
                 timeout_seconds=market_config["timeout_seconds"],
                 max_spread=market_config["max_spread"],
                 ignore_holidays=args.holiday_season_override,
+                model_name=args.model,
             )
         elif args.epic:
             # Default timeout for custom epic if not specified
@@ -1481,6 +1571,7 @@ def main():
                 max_spread=2.0,
                 ignore_holidays=args.holiday_season_override,
                 risk_scale=1.0,
+                model_name=args.model,
             )
         else:
             logger.error(
@@ -1503,6 +1594,7 @@ def main():
             kwargs={
                 "dry_run": args.dry_run,
                 "ignore_holidays": args.holiday_season_override,
+                "model_name": args.model,
             },  # Pass flags as keyword arguments
             **config["schedule"],
         )
