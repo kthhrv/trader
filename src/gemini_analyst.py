@@ -84,33 +84,34 @@ class GeminiAnalyst:
         self.client = genai.Client(api_key=GEMINI_API_KEY)
 
         self.system_instruction = """
-            You are an expert financial trading analyst specializing in breakout strategies for market opens (London/Nikkei).
-            Your goal is to analyze provided OHLC market data, technical indicators, and news sentiment to generate high-quality trading triggers.
-            
-            STRICT RULES:
-            1. Always analyze the risk/reward ratio. Ensure Stop Loss is logical based on recent support/resistance and **AT LEAST 1.5x to 2.0x ATR** from the entry price (especially for volatile markets like Nikkei), with a minimum of 10 POINTS.
-            2. **Structure over Arbitrary Ratios:** Do not place stops inside the rejection zone. If the structural invalidation point (e.g. 6829) requires a stop that is too wide for the account risk parameters, reduce position size rather than tightening the stop to an arbitrary level (e.g. 6816).
-            3. If the market conditions are choppy, low liquidity, or unclear (e.g., conflicting signals), recommend 'WAIT'.
-            4. **Entry Strategy:** All trades must use **'INSTANT'** entry type. Focus on identifying the exact breakout level where the 'wave' starts.
-            5. **Volatility Regime Logic (CRITICAL):**
-               - If the market context indicates **LOW Volatility** (Current ATR < Average ATR or 'Choppy' regime), BREAKOUT strategies have a high failure rate. In these conditions, prioritize **MEAN REVERSION** (Buying Support / Selling Resistance) or **WAIT**.
-               - **EXCEPTION:** If you identify a **'Coiling' pattern** (price consolidating in a narrowing range, e.g., higher lows into a flat resistance), a breakout entry is valid as it anticipates a volatility expansion. Do NOT buy Session Highs in low volatility *unless* this specific coiling/consolidation pattern is clearly present.
-               - If **HIGH Volatility** (ATR > Average, Strong Momentum), Breakout strategies are preferred.
-            6. **Trailing Stop Strategy:**
-               - Set **'use_trailing_stop' = True** if the setup is a high-momentum breakout where price could run significantly (Trend Following).
-               - Set **'use_trailing_stop' = False** if the setup is targeting a specific resistance level or trading inside a range (Mean Reversion), where a fixed Take Profit is better.
-            7. Your output MUST follow a Chain-of-Thought process BEFORE the JSON, like this:
-               *   **Market Overview:** Summarize the current trend, volatility (ATR), and momentum (RSI).
-               *   **Key Levels:** Identify significant support and resistance levels from the OHLC data.
-               *   **News Sentiment:** Evaluate the overall sentiment from the provided news headlines (Positive, Negative, Neutral).
-               *   **Trade Rationale:** Based on the above, explain WHY a BUY/SELL/WAIT signal is generated. Justify entry, stop loss, take profit, trade size, and why the **ATR-based stop** is appropriate. Explicitly justify 'use_trailing_stop'. Ensure Stop Loss is NOT placed *within* the range of the opening 5-minute candle; instead, aim for structural lows (e.g., below the 08:00 low for a BUY).
-               *   **Risk/Reward:** Briefly state the estimated risk/reward for the proposed trade.
-            8. **Sentiment Analysis (Contrarian):**
-               - Use 'Client Sentiment' as a **Contrarian Indicator**.
-               - If >70% of retail clients are **LONG**, be cautious about buying (Crowded Trade). Prefer mean reversion or waits.
-               - If >70% of retail clients are **SHORT**, look for Short Squeezes (Bullish Breakouts).
-               - If sentiment is neutral (40-60%), rely purely on Technicals.
-            9. After the Chain-of-Thought, your final output MUST be strictly in the requested JSON format, and ONLY the JSON. Ensure the 'atr' field reflects the current ATR value provided in the market context.
+            You are a Senior Momentum Trader specializing in "Open Drive" breakout strategies for global indices.
+            Your objective is to identify high-probability breakout setups during the market open (first 90 mins).
+
+            ### 1. Market Analysis Protocol
+            Analyze the provided Market Context (OHLC, Indicators, Session Data) and News to determine the Market Regime:
+            - **High Volatility (ATR > Avg):** Favor **BREAKOUTS** (Trend Following). Look for strong momentum pushing through Key Levels.
+            - **Low Volatility (ATR < Avg):** Favor **MEAN REVERSION** (Fade Extremes) or **WAIT**. Breakouts often fail here ("Fake-outs").
+            - **Coiling:** If price is consolidating (narrowing range), anticipate an imminent volatility expansion (Breakout).
+
+            ### 2. Trading Rules (Strict)
+            - **Direction:** Trade WITH the momentum (Open > EMA20 = Bullish bias, unless overextended).
+            - **Entry:** MUST be a specific price level where the "Wave" begins (e.g., break of Pre-Market High/Low).
+            - **Stop Loss (Risk):**
+                - MUST be structural (below Swing Low / above Swing High).
+                - **MINIMUM DISTANCE:** 1.5x to 2.0x current ATR. (If structural stop is tighter, WIDEN it to meet this minimum).
+                - **MAXIMUM DISTANCE:** 5.0x ATR (If structural stop is wider, reduce position size or WAIT).
+            - **Take Profit:**
+                - **Trend Days:** Use `use_trailing_stop=True` for uncapped upside.
+                - **Range Days:** Use `use_trailing_stop=False` and target a fixed Resistance/Support level (R:R > 1.5).
+
+            ### 3. Contrarian Checks
+            - **Retail Sentiment:** If >70% Long, be cautious of Longs (Crowded Trade). If >70% Short, look for Short Squeezes.
+            - **News:** High-Impact Negative News overrides Bullish Technicals (and vice versa).
+
+            ### 4. Output Format
+            - Think deeply about the setup using your internal monologue.
+            - Output the final decision ONLY as a structured JSON object matching the requested schema.
+            - If the setup is unclear, weak, or violates rules, return `action: "WAIT"`.
             """
 
     def analyze_market(
@@ -122,7 +123,7 @@ class GeminiAnalyst:
         Sends market data to Gemini and returns a structured TradingSignal.
         """
         try:
-            prompt = f"It's 5 minutes before Market Open, Develop a trading strategy for the {strategy_name} based on the following market data, and provide a trading signal:\n\n{market_data_context}"
+            prompt = f"Analyze the following {strategy_name} market data and generate a trading signal:\n\n{market_data_context}"
 
             response = self.client.models.generate_content(
                 model=self.model_name,
@@ -131,8 +132,19 @@ class GeminiAnalyst:
                     system_instruction=self.system_instruction,
                     response_mime_type="application/json",
                     response_schema=TradingSignal.model_json_schema(),
+                    thinking_config=types.ThinkingConfig(
+                        include_thoughts=True,
+                        thinking_level="HIGH",
+                    ),
                 ),
             )
+
+            # Log thoughts if available for transparency
+            for part in response.candidates[0].content.parts:
+                if part.thought:
+                    logger.info(
+                        f"--- Gemini Analysis Thoughts ---\n{part.text}\n-------------------------------"
+                    )
 
             # The SDK with response_schema automatically handles the schema enforcement
             if not response.text:
@@ -196,8 +208,19 @@ class GeminiAnalyst:
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json",
                     response_schema=NewsQuality.model_json_schema(),
+                    thinking_config=types.ThinkingConfig(
+                        include_thoughts=True,
+                        thinking_level="HIGH",
+                    ),
                 ),
             )
+
+            # Log thoughts if available
+            for part in response.candidates[0].content.parts:
+                if part.thought:
+                    logger.info(
+                        f"--- Gemini News Assessment Thoughts ---\n{part.text}\n-------------------------------"
+                    )
 
             if not response.text:
                 logger.error("Gemini returned empty response for news assessment.")
@@ -347,12 +370,25 @@ class GeminiAnalyst:
             ]
 
             config = types.GenerateContentConfig(
-                temperature=0.2, max_output_tokens=8192, safety_settings=safety_settings
+                temperature=0.2,
+                max_output_tokens=8192,
+                safety_settings=safety_settings,
+                thinking_config=types.ThinkingConfig(
+                    include_thoughts=True,
+                    thinking_level="HIGH",
+                ),
             )
 
             response = self.client.models.generate_content(
                 model=self.model_name, contents=prompt, config=config
             )
+
+            # Log thoughts if available
+            for part in response.candidates[0].content.parts:
+                if part.thought:
+                    logger.info(
+                        f"--- Gemini Post-Mortem Thoughts ---\n{part.text}\n-------------------------------"
+                    )
 
             # Safely access text
             if response.candidates:

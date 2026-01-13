@@ -7,8 +7,25 @@ from google.genai import types
 
 # Mock response class to simulate Gemini's return object
 class MockGeminiResponse:
-    def __init__(self, text_content):
+    def __init__(self, text_content, thoughts=None):
         self.text = text_content
+
+        # Mocking the structure: response.candidates[0].content.parts
+        mock_part = MagicMock()
+        if thoughts:
+            mock_part.thought = True
+            mock_part.text = thoughts
+        else:
+            mock_part.thought = False
+            mock_part.text = text_content
+
+        mock_content = MagicMock()
+        mock_content.parts = [mock_part]
+
+        mock_candidate = MagicMock()
+        mock_candidate.content = mock_content
+
+        self.candidates = [mock_candidate]
 
 
 @pytest.fixture
@@ -58,7 +75,7 @@ def test_analyze_market_success(mock_genai):
     mock_client.models.generate_content.assert_called_once()
     call_kwargs = mock_client.models.generate_content.call_args.kwargs
 
-    assert call_kwargs["model"] == "gemini-3-pro-preview"
+    assert call_kwargs["model"] == "gemini-3-flash-preview"
     assert "Some market context" in call_kwargs["contents"]
     assert "Test Strategy" in call_kwargs["contents"]
 
