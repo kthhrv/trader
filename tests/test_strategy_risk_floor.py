@@ -27,7 +27,9 @@ class TestStrategyRiskFloor(unittest.TestCase):
 
         self.set_balance = set_balance
 
-        self.engine = StrategyEngine(epic="TEST", ig_client=self.mock_client)
+        self.engine = StrategyEngine(
+            epic="TEST", ig_client=self.mock_client, min_size=0.5
+        )
 
     @patch("src.strategy_engine.RISK_PER_TRADE_PERCENT", 0.01)  # 1% Risk
     @patch("src.strategy_engine.MIN_ACCOUNT_BALANCE", 1000.0)  # Floor at £1000
