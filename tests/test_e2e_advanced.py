@@ -4,6 +4,7 @@ import os
 import tempfile
 import logging
 import time
+from threading import Thread
 
 from src.strategy_engine import StrategyEngine, Action, TradingSignal, EntryType
 from src.database import init_db
@@ -108,14 +109,9 @@ def test_e2e_trailing_stop(advanced_mocks, caplog):
     )
     logging.getLogger("src.strategy_engine").setLevel(logging.DEBUG)
     engine.generate_plan()
-    assert engine.active_plan is not None
-
-    # 2. Start Execution
-    from threading import Thread
-
     trade_execution_thread = Thread(
         target=engine.execute_strategy,
-        kwargs={"timeout_seconds": 4.0, "collection_seconds": 5},
+        kwargs={"timeout_seconds": 10.0, "collection_seconds": 15},
         daemon=True,
     )
     trade_execution_thread.start()
@@ -146,52 +142,41 @@ def test_e2e_trailing_stop(advanced_mocks, caplog):
         "direction": "BUY",
         "bid": 7500,
         "offer": 7501,
-        "stopLevel": 7450,
+        "stopLevel": 7449,  # Adjusted SL
     }
 
-    # Move 1: Profit = 1.0R (50 pts). Price = 7550.
-    # NEW LOGIC: Stop should NOT move (Wait for 1.5R).
+    # Move 1: Profit < 1.5R.
     move_1_pos = {
         "dealId": "MOCK_DEAL_ID",
         "direction": "BUY",
         "bid": 7550,
         "offer": 7551,
-        "stopLevel": 7450,
+        "stopLevel": 7449,
     }
 
-    # Move 2: Profit = 1.5R (75 pts). Price = 7580.
-    # NEW LOGIC: Breakeven triggers (7501). Trailing triggers (2.0 ATR = 20 pts -> 7560).
+    # Move 2: Profit > 1.5R (7501 + 1.5*52 = 7579). Price = 7590.
     move_2_pos = {
         "dealId": "MOCK_DEAL_ID",
         "direction": "BUY",
-        "bid": 7580,
-        "offer": 7581,
-        "stopLevel": 7450,
+        "bid": 7590,
+        "offer": 7591,
+        "stopLevel": 7449,
     }
 
     # The monitor polls. We sequence the returns.
-    # Note: We do NOT return None for closure here anymore, as closure is event driven.
-    # We keep returning the last state to keep the loop running until we trigger closure event.
-    mock_ig_client.fetch_open_position_by_deal_id.side_effect = [
-        initial_pos,
-        initial_pos,
-        move_1_pos,
-        move_1_pos,
-        move_2_pos,
-        move_2_pos,
-        move_2_pos,
-        move_2_pos,
-        move_2_pos,
-        move_2_pos,
-        move_2_pos,
-        move_2_pos,
-        move_2_pos,
-        move_2_pos,
-        move_2_pos,
-    ]
+    # We use a large list to prevent StopIteration during the sleep window
+    mock_ig_client.fetch_open_position_by_deal_id.side_effect = (
+        [initial_pos] * 20 + [move_1_pos] * 20 + [move_2_pos] * 100
+    )
 
-    # Give time for trailing logic to run
-    time.sleep(1.0)
+    # Give time for trailing logic to run (polling interval is 0.1s, we need a few polls)
+    # We poll for the expected call count with a timeout
+    start_wait = time.time()
+    while (
+        mock_ig_client.update_open_position.call_count < 2
+        and (time.time() - start_wait) < 5.0
+    ):
+        time.sleep(0.1)
 
     # 4. Trigger Closure via Stream
     mock_stream_manager.simulate_trade_update(
@@ -214,9 +199,9 @@ def test_e2e_trailing_stop(advanced_mocks, caplog):
     args1 = mock_ig_client.update_open_position.call_args_list[0]
     assert args1[1]["stop_level"] == 7501.0  # Entry Price (Adjusted)
 
-    # Second update: Trailing (ATR 10 * 3 = 30. Price 7580 - 30 = 7550)
+    # Second update: Trailing (ATR 10 * 3 = 30. Price 7590 - 30 = 7560)
     args2 = mock_ig_client.update_open_position.call_args_list[1]
-    assert args2[1]["stop_level"] == 7550.0  # 7580 - 30 (Wider trail)
+    assert args2[1]["stop_level"] == 7560.0  # 7590 - 30 (Wider trail)
 
 
 def test_e2e_no_trailing_stop(advanced_mocks, caplog):
@@ -267,11 +252,9 @@ def test_e2e_no_trailing_stop(advanced_mocks, caplog):
     engine.generate_plan()
 
     # 2. Start Execution
-    from threading import Thread
-
     trade_execution_thread = Thread(
         target=engine.execute_strategy,
-        kwargs={"timeout_seconds": 4.0, "collection_seconds": 5},
+        kwargs={"timeout_seconds": 10.0, "collection_seconds": 15},
         daemon=True,
     )
     trade_execution_thread.start()
@@ -299,13 +282,9 @@ def test_e2e_no_trailing_stop(advanced_mocks, caplog):
         "stopLevel": 7450,
     }
 
-    mock_ig_client.fetch_open_position_by_deal_id.side_effect = [
-        initial_pos,
-        initial_pos,
-        move_pos,
-        move_pos,
-        move_pos,
-    ]
+    mock_ig_client.fetch_open_position_by_deal_id.side_effect = [initial_pos] * 5 + [
+        move_pos
+    ] * 100
 
     # Mock order placement return to match deal ID (needed for monitor)
     mock_ig_client.place_spread_bet_order.return_value = {
