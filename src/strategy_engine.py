@@ -93,8 +93,12 @@ class StrategyEngine:
         logger.info(f"Generating plan for {self.epic} ({self.strategy_name})...")
 
         try:
-            # 1. Fetch Historical Data (Fetch 50 points to allow for indicator calculation)
+            # 1. Fetch Historical Data
+            # Fetch 15Min data for indicators (50 points)
             df = self.client.fetch_historical_data(self.epic, "15Min", 50)
+
+            # Fetch 5Min data for granular structure (24 points = 2 hours)
+            df_5m = self.client.fetch_historical_data(self.epic, "5Min", 24)
 
             # Fetch Daily Data for macro trend context
             df_daily = self.client.fetch_historical_data(self.epic, "D", 10)
@@ -172,8 +176,16 @@ class StrategyEngine:
                 market_context += df_daily.to_string()
                 market_context += "\n"
 
-            market_context += "Recent OHLC Data (Last 12 Hours, 15m intervals):\n"
+            market_context += (
+                "\n--- Recent OHLC Data (Last 12 Hours, 15m intervals) ---\n"
+            )
             market_context += df.to_string()
+            market_context += "\n"
+
+            market_context += (
+                "\n--- Granular OHLC Data (Last 2 Hours, 5m intervals) ---\n"
+            )
+            market_context += df_5m.to_string()
 
             market_context += "\n\n--- Session Context (Today so far) ---\n"
             if session_high is not None and session_low is not None:

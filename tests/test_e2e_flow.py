@@ -166,7 +166,7 @@ def test_e2e_trading_flow(e2e_mocks, caplog):
     engine.generate_plan()
     assert engine.active_plan is not None
     assert engine.active_plan.action == Action.BUY
-    assert mock_ig_client.fetch_historical_data.call_count == 2
+    assert mock_ig_client.fetch_historical_data.call_count == 3
     mock_gemini_analyst.analyze_market.assert_called_once()
 
     # 4. Execute Strategy - this starts monitoring

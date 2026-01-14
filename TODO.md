@@ -1,15 +1,13 @@
 # Project Roadmap & Tech Debt
 
+## Completed Milestones (Recent)
+- [x] **Session Context**: Passed `today_high` and `today_low` (Session Extremes) to the Gemini Analyst to prevent selling bottoms/buying tops.
+- [x] **Capital Preservation (Risk Floor)**: Implemented `MIN_ACCOUNT_BALANCE` check with dynamic position sizing step-down (Standard -> Min Size -> Abort).
+- [x] **API Resilience**: Added retry logic (with exponential backoff) for Gemini 503/500 errors to prevent strategy aborts on transient AI outages.
+- [x] **Hardened Risk Technicals**: Enforced strict **1.5x - 2.0x ATR** minimum stop loss distance in the Analyst prompt to prevent volatility stop-outs.
+- [x] **Granular Price History**: Included last 2 hours of **5-minute candles** in the AI prompt context to help AI see specific "wick rejections" that 15-minute candles hide.
+
 ## Trading Strategy Enhancements
-- [ ] **Refine Entry Types**: Currently, `EntryType.INSTANT` acts as a "Market if Touched" logic, but logic assumes Breakout. 
-    - Split into:
-        - `BREAKOUT` (Stop Entry): Buy if Price >= Level.
-        - `PULLBACK` (Limit Entry): Buy if Price <= Level.
-    - Fix logic in `StrategyEngine` to handle the conditional trigger direction correctly for Pullbacks.
-- [x] **Session Context**: Pass `today_high` and `today_low` (Session Extremes) to the Gemini Analyst.
-    - Goal: Prevent "Selling the Bottom" or "Buying the Top" traps.
-- [ ] **Granular Price History**: Include last 2 hours of **5-minute candles** in the AI prompt context.
-    - Goal: Help AI see specific "wick rejections" that 15-minute candles hide.
 
 ## Architecture & Infrastructure
 - [ ] **Single Stream Architecture**: 
