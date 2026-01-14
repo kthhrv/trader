@@ -6,6 +6,12 @@ from enum import Enum
 from google import genai
 from google.genai import errors, types
 from pydantic import BaseModel, Field
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential,
+    retry_if_exception_type,
+)
 
 from config import GEMINI_API_KEY
 
@@ -117,6 +123,12 @@ class GeminiAnalyst:
             - If the setup is unclear, weak, or violates rules, return `action: "WAIT"`.
             """
 
+    @retry(
+        stop=stop_after_attempt(2),  # Try once, then retry once = 2 attempts total
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception_type((errors.ServerError, errors.APIError)),
+        reraise=True,  # Let the final exception bubble up to be caught by the try/except block inside
+    )
     def analyze_market(
         self,
         market_data_context: str,
