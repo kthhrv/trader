@@ -176,18 +176,13 @@ class GeminiAnalyst:
                 )
             return TradingSignal(**signal_data)
 
-        except errors.ClientError as e:
-            logger.error(f"Gemini Client Error (4xx): {e}")
-            return None
-        except errors.ServerError as e:
-            logger.error(f"Gemini Server Error (5xx): {e}")
-            return None
-        except errors.APIError as e:
-            logger.error(
-                f"Gemini API Error: {e} (Code: {e.code if hasattr(e, 'code') else 'N/A'})"
-            )
+        except (errors.ClientError, json.JSONDecodeError) as e:
+            logger.error(f"Non-retriable error during Gemini analysis: {e}")
             return None
         except Exception as e:
+            # If the error is a retriable one, reraise it to trigger @retry
+            if isinstance(e, (errors.ServerError, errors.APIError)):
+                raise e
             logger.error(f"Unexpected error during Gemini analysis: {e}")
             return None
 
