@@ -98,10 +98,11 @@ class GeminiAnalyst:
             - **Extension Rule (No Chasing):** Do NOT recommend a trade if the entry price is more than **1.5x ATR** away from the 20-period EMA. Wait for a pullback or return 'WAIT'.
             - **Entry:** MUST be a specific price level where the "Wave" begins (e.g., break of Pre-Market High/Low).
             - **Stop Loss (Risk):**
-                - MUST be structural (below Swing Low / above Swing High).
-                - **MINIMUM DISTANCE:** 1.5x to 2.0x current ATR. (If structural stop is tighter, WIDEN it to meet this minimum).
-                - **MAXIMUM DISTANCE:** 5.0x ATR (If structural stop is wider, reduce position size or WAIT).
-                - **Pre-Open Safety:** For entries near the open (e.g., HH:55), the Stop **MUST** clear the *entire* session high/low volatility structure to survive the opening flush.
+                - **HARD RULE:** The Stop Loss MUST be at least **1.5x ATR** away from the entry price, regardless of nearby technical levels.
+                - **Structural Placement:** Place beyond Swing High/Low or Key Moving Averages, BUT ensure the distance meets the 1.5x ATR minimum. If the structural level is too close (e.g., 10 points away when ATR is 15), you MUST add padding to reach >1.5x ATR.
+                - **High Volatility Regime:** When ATR > Average, increase minimum distance to **2.0x ATR** to survive "stop runs".
+                - **Pre-Open/Opening Flush:** Do NOT place stops exactly at the High/Low of the pre-market session. Add a buffer (0.5x ATR) *beyond* the Wick to avoid liquidity sweeps.
+                - **MAXIMUM DISTANCE:** 5.0x ATR (If structural stop requires >5x ATR, return 'WAIT').
             - **Take Profit / Management:**
                 - **Trend Days:** Use `use_trailing_stop=True` for uncapped upside.
                 - **Range Days:** Use `use_trailing_stop=False` and target a fixed Resistance/Support level (R:R > 1.5).
