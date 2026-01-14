@@ -100,6 +100,9 @@ class StrategyEngine:
             # Fetch 5Min data for granular structure (24 points = 2 hours)
             df_5m = self.client.fetch_historical_data(self.epic, "5Min", 24)
 
+            # Fetch 1Min data for precise timing (15 points = 15 mins)
+            df_1m = self.client.fetch_historical_data(self.epic, "1Min", 15)
+
             # Fetch Daily Data for macro trend context
             df_daily = self.client.fetch_historical_data(self.epic, "D", 10)
             if df_daily.empty:
@@ -186,6 +189,12 @@ class StrategyEngine:
                 "\n--- Granular OHLC Data (Last 2 Hours, 5m intervals) ---\n"
             )
             market_context += df_5m.to_string()
+            market_context += "\n"
+
+            market_context += (
+                "\n--- Timing OHLC Data (Last 15 Minutes, 1m intervals) ---\n"
+            )
+            market_context += df_1m.to_string()
 
             market_context += "\n\n--- Session Context (Today so far) ---\n"
             if session_high is not None and session_low is not None:
