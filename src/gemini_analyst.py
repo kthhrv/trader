@@ -18,6 +18,12 @@ from config import GEMINI_API_KEY
 logger = logging.getLogger(__name__)
 
 
+class EmptyGeminiResponseError(Exception):
+    """Raised when Gemini returns a response with no text content."""
+
+    pass
+
+
 class Action(str, Enum):
     BUY = "BUY"
     SELL = "SELL"
@@ -136,7 +142,9 @@ class GeminiAnalyst:
     @retry(
         stop=stop_after_attempt(2),  # Try once, then retry once = 2 attempts total
         wait=wait_exponential(multiplier=1, min=2, max=10),
-        retry=retry_if_exception_type((errors.ServerError, errors.APIError)),
+        retry=retry_if_exception_type(
+            (errors.ServerError, errors.APIError, EmptyGeminiResponseError)
+        ),
         reraise=True,  # Let the final exception bubble up to be caught by the try/except block inside
     )
     def analyze_market(
@@ -173,8 +181,12 @@ class GeminiAnalyst:
 
             # The SDK with response_schema automatically handles the schema enforcement
             if not response.text:
-                logger.error("Gemini returned empty response text.")
-                return None
+                candidate = response.candidates[0]
+                error_msg = f"Gemini returned empty response text. Finish Reason: {candidate.finish_reason}, Safety Ratings: {candidate.safety_ratings}"
+                logger.warning(
+                    f"{error_msg} - Raising EmptyGeminiResponseError to trigger retry."
+                )
+                raise EmptyGeminiResponseError(error_msg)
 
             signal_data = json.loads(response.text)
             # Handle potential missing entry_type from older models or if omitted (default fallback)
@@ -191,7 +203,9 @@ class GeminiAnalyst:
             return None
         except Exception as e:
             # If the error is a retriable one, reraise it to trigger @retry
-            if isinstance(e, (errors.ServerError, errors.APIError)):
+            if isinstance(
+                e, (errors.ServerError, errors.APIError, EmptyGeminiResponseError)
+            ):
                 raise e
             logger.error(f"Unexpected error during Gemini analysis: {e}")
             return None
