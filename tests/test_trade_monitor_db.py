@@ -79,7 +79,8 @@ class TestTradeMonitorDB(unittest.TestCase):
             if args[0] == deal_id:
                 self.assertEqual(args[1], 105.0)  # Exit Price
                 self.assertEqual(args[2], 50.5)  # PnL
-                self.assertEqual(kwargs.get("outcome"), "CLOSED")
+                outcome = kwargs.get("outcome") or (args[4] if len(args) > 4 else None)
+                self.assertEqual(outcome, "CLOSED")
                 found_call = True
                 break
 
@@ -232,7 +233,7 @@ class TestTradeMonitorDB(unittest.TestCase):
 
         # Verify arguments - epic and expiry should be None
         self.mock_client.close_open_position.assert_called_with(
-            deal_id, "SELL", 2.5, epic=None, expiry=None
+            deal_id=deal_id, direction="SELL", size=2.5, epic=None, expiry=None
         )
 
 

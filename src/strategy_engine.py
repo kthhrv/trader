@@ -404,6 +404,11 @@ class StrategyEngine:
 
                                     if not success:
                                         self.position_open = False
+                                    elif self.dry_run:
+                                        logger.info(
+                                            "Dry Run execution complete. Exiting strategy loop."
+                                        )
+                                        return
 
                                     decision_made = True
                                     trading_active = False  # Stop looking once executed

@@ -163,11 +163,36 @@ def test_e2e_trailing_stop(advanced_mocks, caplog):
         "stopLevel": 7449,
     }
 
-    # The monitor polls. We sequence the returns.
-    # We use a large list to prevent StopIteration during the sleep window
-    mock_ig_client.fetch_open_position_by_deal_id.side_effect = (
-        [initial_pos] * 20 + [move_1_pos] * 20 + [move_2_pos] * 100
-    )
+    # Dynamic mock for fetch_open_position that reflects updated stop levels
+    current_pos_state = {"stopLevel": 7449.0}  # Initial adjusted SL
+
+    def fetch_pos_side_effect(deal_id):
+        # Determine base price based on time/call count logic or just iterate through a sequence?
+        # We can use the original sequence logic but override stopLevel.
+        # But wait, the original sequence had 20+20+100 items.
+        # Let's just map time to price or simply iterate an iterator and update the stopLevel.
+
+        # Simple iterator wrapper
+        try:
+            pos = next(pos_iterator)
+            pos["stopLevel"] = current_pos_state["stopLevel"]
+            return pos
+        except StopIteration:
+            return None
+
+    # Update stop level when update_open_position is called
+    def update_pos_side_effect(deal_id, stop_level=None, limit_level=None):
+        if stop_level:
+            current_pos_state["stopLevel"] = stop_level
+        return {"dealId": deal_id, "status": "ACCEPTED"}
+
+    mock_ig_client.update_open_position.side_effect = update_pos_side_effect
+
+    # Define the sequence of market moves
+    pos_sequence = [initial_pos] * 20 + [move_1_pos] * 20 + [move_2_pos] * 100
+    pos_iterator = iter(pos_sequence)
+
+    mock_ig_client.fetch_open_position_by_deal_id.side_effect = fetch_pos_side_effect
 
     # Give time for trailing logic to run (polling interval is 0.1s, we need a few polls)
     # We poll for the expected call count with a timeout

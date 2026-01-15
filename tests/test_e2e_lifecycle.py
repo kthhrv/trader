@@ -147,7 +147,7 @@ def test_trade_lifecycle_flow(lifecycle_db):
         exit_price=110.0,
         pnl=100.0,
         exit_time="2025-01-01T12:00:00",
-        status="CLOSED",
+        outcome="CLOSED",
     )
 
     # Verification 3: Check DB for CLOSED state

@@ -60,9 +60,11 @@ class TestTradeMonitorDBDeleted(unittest.TestCase):
 
         # Check DB update was triggered
         mock_update_db.assert_called_once()
-        kwargs = mock_update_db.call_args[1]
+        args, kwargs = mock_update_db.call_args
+        # Handle both positional and keyword cases
+        outcome = kwargs.get("outcome") or (args[4] if len(args) > 4 else None)
         self.assertEqual(
-            kwargs["outcome"], "CLOSED"
+            outcome, "CLOSED"
         )  # Our code sets final status to CLOSED even if trigger was DELETED
 
 
