@@ -10,6 +10,12 @@ from src.news_fetcher import NewsFetcher
 logger = logging.getLogger(__name__)
 
 
+class MarketDataError(Exception):
+    """Raised when critical market data cannot be fetched."""
+
+    pass
+
+
 class MarketDataProvider:
     def __init__(
         self,
@@ -63,38 +69,52 @@ class MarketDataProvider:
         try:
             df = self.client.fetch_historical_data(epic, "D", 10)
             if df.empty:
-                logger.warning("No daily data received.")
+                raise MarketDataError(f"No daily data received for {epic}")
             return df
         except Exception as e:
             logger.error(f"Error fetching daily data: {e}")
-            return pd.DataFrame()
+            raise MarketDataError(
+                f"Critical: Failed to fetch daily data for {epic}"
+            ) from e
 
     def _fetch_15m_data(self, epic: str) -> pd.DataFrame:
         try:
             # Fetch 50 points to allow for indicator calculation (RSI/ATR)
             df = self.client.fetch_historical_data(epic, "15Min", 50)
             if df.empty:
-                logger.warning("No 15m data received.")
+                raise MarketDataError(f"No 15m data received for {epic}")
             return df
         except Exception as e:
             logger.error(f"Error fetching 15m data: {e}")
-            return pd.DataFrame()
+            raise MarketDataError(
+                f"Critical: Failed to fetch 15m data for {epic}"
+            ) from e
 
     def _fetch_granular_data(self, epic: str) -> pd.DataFrame:
         try:
             # 24 points = 2 hours of 5m data
-            return self.client.fetch_historical_data(epic, "5Min", 24)
+            df = self.client.fetch_historical_data(epic, "5Min", 24)
+            if df.empty:
+                raise MarketDataError(f"No 5m data received for {epic}")
+            return df
         except Exception as e:
-            logger.warning(f"Error fetching 5m data: {e}")
-            return pd.DataFrame()
+            logger.error(f"Error fetching 5m data: {e}")
+            raise MarketDataError(
+                f"Critical: Failed to fetch 5m data for {epic}"
+            ) from e
 
     def _fetch_timing_data(self, epic: str) -> pd.DataFrame:
         try:
             # 15 points = 15 mins of 1m data
-            return self.client.fetch_historical_data(epic, "1Min", 15)
+            df = self.client.fetch_historical_data(epic, "1Min", 15)
+            if df.empty:
+                raise MarketDataError(f"No 1m data received for {epic}")
+            return df
         except Exception as e:
-            logger.warning(f"Error fetching 1m data: {e}")
-            return pd.DataFrame()
+            logger.error(f"Error fetching 1m data: {e}")
+            raise MarketDataError(
+                f"Critical: Failed to fetch 1m data for {epic}"
+            ) from e
 
     def _calculate_indicators(self, df: pd.DataFrame) -> tuple[pd.DataFrame, Dict]:
         """
@@ -189,7 +209,10 @@ class MarketDataProvider:
 
     def _fetch_news(self, epic: str, query: str = None) -> str:
         q = query if query else self._get_default_news_query(epic)
-        return self.news_fetcher.fetch_news(q)
+        news_result = self.news_fetcher.fetch_news(q)
+        if not news_result or "Error fetching news" in news_result:
+            raise MarketDataError(f"Critical: Failed to fetch news for {q}")
+        return news_result
 
     def _get_default_news_query(self, epic: str) -> str:
         # Same logic as StrategyEngine._get_news_query

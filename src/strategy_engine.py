@@ -11,7 +11,7 @@ from src.trade_logger_db import TradeLoggerDB
 from src.trade_monitor_db import TradeMonitorDB
 from src.market_status import MarketStatus
 from src.stream_manager import StreamManager
-from src.market_data_provider import MarketDataProvider
+from src.market_data_provider import MarketDataProvider, MarketDataError
 from src.trade_executor import TradeExecutor
 
 logger = logging.getLogger(__name__)
@@ -196,6 +196,9 @@ class StrategyEngine:
                 logger.error("PLAN RESULT: Gemini signal generation failed.")
                 self.active_plan = None
 
+        except MarketDataError as e:
+            logger.error(f"Strategy aborted due to missing market data: {e}")
+            self.active_plan = None
         except Exception as e:
             logger.error(f"Error generating plan: {e}")
 
