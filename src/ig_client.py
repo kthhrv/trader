@@ -17,6 +17,14 @@ logger = logging.getLogger(__name__)
 
 
 class IGClient:
+    _instance = None
+    _initialized = False
+
+    def __new__(cls, *args, **kwargs):
+        if not cls._instance:
+            cls._instance = super(IGClient, cls).__new__(cls)
+        return cls._instance
+
     def __init__(self):
         """
         Initializes the IG Client.
@@ -28,6 +36,9 @@ class IGClient:
         strictly for fetching historical data (bypassing Demo limits), while keeping
         trading on the DEMO account.
         """
+        if self._initialized:
+            return
+
         # 1. Primary Service (Trading)
         self.service = IGService(
             IG_USERNAME,
@@ -73,6 +84,7 @@ class IGClient:
                         self.data_service = self.service
 
         self.authenticated = False
+        self._initialized = True
 
     def _apply_timeout_patch(self, service_obj):
         """Enforces default timeout on the session."""

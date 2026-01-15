@@ -11,6 +11,16 @@ def mock_ig_service():
         yield mock
 
 
+@pytest.fixture(autouse=True)
+def reset_singleton():
+    """Resets the IGClient singleton state before each test."""
+    IGClient._instance = None
+    IGClient._initialized = False
+    yield
+    IGClient._instance = None
+    IGClient._initialized = False
+
+
 def test_authenticate_success(mock_ig_service):
     # Setup
     mock_instance = MagicMock()
