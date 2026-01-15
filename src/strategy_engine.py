@@ -37,6 +37,7 @@ class StrategyEngine:
         risk_scale: float = 1.0,
         min_size: float = 0.01,
         model_name: str = "gemini-3-flash-preview",
+        live_data: bool = False,
     ):
         """
         Orchestrates the trading workflow for a single instrument.
@@ -46,6 +47,7 @@ class StrategyEngine:
         self.strategy_name = strategy_name
         self.news_query = news_query
         self.dry_run = dry_run
+        self.live_data = live_data
         self.verbose = verbose
         self.max_spread = max_spread
         self.ignore_holidays = ignore_holidays
@@ -70,7 +72,10 @@ class StrategyEngine:
         )
 
         # Initialize Data Provider
-        self.data_provider = MarketDataProvider(self.client, self.news_fetcher)
+        use_cache = self.dry_run and not self.live_data
+        self.data_provider = MarketDataProvider(
+            self.client, self.news_fetcher, use_cache=use_cache
+        )
 
         # Initialize Trade Executor
         self.executor = TradeExecutor(
@@ -120,6 +125,9 @@ class StrategyEngine:
                 market_context, strategy_name=self.strategy_name
             )
             self.last_analysis_time = time.time()
+
+            if signal:
+                logger.info(f"RAW SIGNAL JSON: {signal.model_dump_json()}")
 
             current_spread = 0.0
             try:

@@ -38,6 +38,7 @@ def mock_deps():
 
     # Mock VIX and Sentiment
     mock_client.service.fetch_market_by_epic.return_value = {"snapshot": {"bid": 20.0}}
+    mock_client.get_market_info.return_value = {"snapshot": {"bid": 20.0}}
     mock_client.data_service.fetch_market_by_epic.return_value = {
         "instrument": {"marketId": "123"}
     }

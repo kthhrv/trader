@@ -986,12 +986,13 @@ def run_strategy(
     risk_scale: float = 1.0,
     min_size: float = 0.01,
     model_name: str = "gemini-3-flash-preview",
+    live_data: bool = False,
 ):
     """
     Generic driver for a trading strategy on a specific epic.
     """
     logger.info(
-        f"--- STARTING {strategy_name} STRATEGY for {epic} (Model: {model_name}, Dry Run: {dry_run}, Timeout: {timeout_seconds}s) ---"
+        f"--- STARTING {strategy_name} STRATEGY for {epic} (Model: {model_name}, Dry Run: {dry_run}, Live Data: {live_data}, Timeout: {timeout_seconds}s) ---"
     )
 
     engine = StrategyEngine(
@@ -1005,6 +1006,7 @@ def run_strategy(
         risk_scale=risk_scale,
         min_size=min_size,
         model_name=model_name,
+        live_data=live_data,
     )
 
     # 1. Generate Plan
@@ -1025,6 +1027,7 @@ def run_london_strategy(
     dry_run: bool = False,
     ignore_holidays: bool = False,
     model_name: str = "gemini-3-flash-preview",
+    live_data: bool = False,
 ):
     config = MARKET_CONFIGS["london"]
     run_strategy(
@@ -1038,6 +1041,7 @@ def run_london_strategy(
         risk_scale=config.get("risk_scale", 1.0),
         min_size=config.get("min_size", 0.01),
         model_name=model_name,
+        live_data=live_data,
     )
 
 
@@ -1045,6 +1049,7 @@ def run_ny_strategy(
     dry_run: bool = False,
     ignore_holidays: bool = False,
     model_name: str = "gemini-3-flash-preview",
+    live_data: bool = False,
 ):
     config = MARKET_CONFIGS["ny"]
     run_strategy(
@@ -1058,6 +1063,7 @@ def run_ny_strategy(
         risk_scale=config.get("risk_scale", 1.0),
         min_size=config.get("min_size", 0.01),
         model_name=model_name,
+        live_data=live_data,
     )
 
 
@@ -1065,6 +1071,7 @@ def run_nikkei_strategy(
     dry_run: bool = False,
     ignore_holidays: bool = False,
     model_name: str = "gemini-3-flash-preview",
+    live_data: bool = False,
 ):
     config = MARKET_CONFIGS["nikkei"]
     run_strategy(
@@ -1078,6 +1085,7 @@ def run_nikkei_strategy(
         risk_scale=config.get("risk_scale", 1.0),
         min_size=config.get("min_size", 0.01),
         model_name=model_name,
+        live_data=live_data,
     )
 
 
@@ -1085,6 +1093,7 @@ def run_germany_strategy(
     dry_run: bool = False,
     ignore_holidays: bool = False,
     model_name: str = "gemini-3-flash-preview",
+    live_data: bool = False,
 ):
     config = MARKET_CONFIGS["germany"]
     run_strategy(
@@ -1098,6 +1107,7 @@ def run_germany_strategy(
         risk_scale=config.get("risk_scale", 1.0),
         min_size=config.get("min_size", 0.01),
         model_name=model_name,
+        live_data=live_data,
     )
 
 
@@ -1105,6 +1115,7 @@ def run_australia_strategy(
     dry_run: bool = False,
     ignore_holidays: bool = False,
     model_name: str = "gemini-3-flash-preview",
+    live_data: bool = False,
 ):
     config = MARKET_CONFIGS["australia"]
     run_strategy(
@@ -1118,6 +1129,7 @@ def run_australia_strategy(
         risk_scale=config.get("risk_scale", 1.0),
         min_size=config.get("min_size", 0.01),
         model_name=model_name,
+        live_data=live_data,
     )
 
 
@@ -1125,6 +1137,7 @@ def run_us_tech_strategy(
     dry_run: bool = False,
     ignore_holidays: bool = False,
     model_name: str = "gemini-3-flash-preview",
+    live_data: bool = False,
 ):
     config = MARKET_CONFIGS["us_tech"]
     run_strategy(
@@ -1138,6 +1151,7 @@ def run_us_tech_strategy(
         risk_scale=config.get("risk_scale", 1.0),
         min_size=config.get("min_size", 0.01),
         model_name=model_name,
+        live_data=live_data,
     )
 
 
@@ -1260,6 +1274,11 @@ def main():
         "--force-api-fetch",
         action="store_true",
         help="When using --check-missed or --weekly-powerlaw-events, force fetching data from IG API if local data is missing.",
+    )
+    parser.add_argument(
+        "--live",
+        action="store_true",
+        help="Force live API data fetch during dry-runs (disables caching).",
     )
     parser.add_argument(
         "--verbose", "-v", action="store_true", help="Print live prices to console"
@@ -1517,6 +1536,7 @@ def main():
             risk_scale=config.get("risk_scale", 1.0),
             min_size=config.get("min_size", 0.01),
             model_name=args.model,
+            live_data=args.live,
         )
 
         # Generate Plan
@@ -1559,6 +1579,7 @@ def main():
                 max_spread=market_config["max_spread"],
                 ignore_holidays=args.holiday_season_override,
                 model_name=args.model,
+                live_data=args.live,
             )
         elif args.epic:
             # Default timeout for custom epic if not specified
@@ -1573,6 +1594,7 @@ def main():
                 ignore_holidays=args.holiday_season_override,
                 risk_scale=1.0,
                 model_name=args.model,
+                live_data=args.live,
             )
         else:
             logger.error(
@@ -1596,6 +1618,7 @@ def main():
                 "dry_run": args.dry_run,
                 "ignore_holidays": args.holiday_season_override,
                 "model_name": args.model,
+                "live_data": args.live,
             },  # Pass flags as keyword arguments
             **config["schedule"],
         )

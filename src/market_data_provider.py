@@ -1,8 +1,12 @@
 import logging
+import os
+import pickle
+import time
+import hashlib
 from datetime import datetime, timezone
 import pandas as pd
 import pandas_ta as ta
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 from src.ig_client import IGClient
 from src.news_fetcher import NewsFetcher
@@ -22,10 +26,59 @@ class MarketDataProvider:
         ig_client: IGClient,
         news_fetcher: NewsFetcher,
         vix_epic: str = "CC.D.VIX.USS.IP",
+        use_cache: bool = False,
+        cache_ttl: int = 9000,  # 15 minutes default
     ):
         self.client = ig_client
         self.news_fetcher = news_fetcher
         self.vix_epic = vix_epic
+        self.use_cache = use_cache
+        self.cache_ttl = cache_ttl
+        self.cache_dir = ".cache"
+
+        if self.use_cache:
+            os.makedirs(self.cache_dir, exist_ok=True)
+            logger.info(f"Caching enabled. TTL: {self.cache_ttl}s")
+
+    def _get_cache_key(self, prefix: str, identifier: str) -> str:
+        """Generates a unique cache key based on prefix, identifier and today's date."""
+        today = datetime.now().strftime("%Y-%m-%d")
+        raw_key = f"{prefix}_{identifier}_{today}"
+        return hashlib.md5(raw_key.encode()).hexdigest()
+
+    def _load_from_cache(self, key: str) -> Optional[Any]:
+        if not self.use_cache:
+            return None
+
+        path = os.path.join(self.cache_dir, f"{key}.pkl")
+        if not os.path.exists(path):
+            return None
+
+        try:
+            # Check TTL
+            mtime = os.path.getmtime(path)
+            if (time.time() - mtime) > self.cache_ttl:
+                logger.debug(f"Cache expired for {key}")
+                return None
+
+            with open(path, "rb") as f:
+                data = pickle.load(f)
+            logger.info(f"Loaded {key} from cache.")
+            return data
+        except Exception as e:
+            logger.warning(f"Failed to load cache for {key}: {e}")
+            return None
+
+    def _save_to_cache(self, key: str, data: Any):
+        if not self.use_cache:
+            return
+
+        path = os.path.join(self.cache_dir, f"{key}.pkl")
+        try:
+            with open(path, "wb") as f:
+                pickle.dump(data, f)
+        except Exception as e:
+            logger.warning(f"Failed to save cache for {key}: {e}")
 
     def get_market_context(
         self, epic: str, news_query: str = None, strategy_name: str = "Market Open"
@@ -66,10 +119,16 @@ class MarketDataProvider:
         )
 
     def _fetch_daily_data(self, epic: str) -> pd.DataFrame:
+        cache_key = self._get_cache_key("daily", epic)
+        cached = self._load_from_cache(cache_key)
+        if cached is not None:
+            return cached
+
         try:
             df = self.client.fetch_historical_data(epic, "D", 10)
             if df.empty:
                 raise MarketDataError(f"No daily data received for {epic}")
+            self._save_to_cache(cache_key, df)
             return df
         except Exception as e:
             logger.error(f"Error fetching daily data: {e}")
@@ -78,11 +137,17 @@ class MarketDataProvider:
             ) from e
 
     def _fetch_15m_data(self, epic: str) -> pd.DataFrame:
+        cache_key = self._get_cache_key("15m", epic)
+        cached = self._load_from_cache(cache_key)
+        if cached is not None:
+            return cached
+
         try:
             # Fetch 50 points to allow for indicator calculation (RSI/ATR)
             df = self.client.fetch_historical_data(epic, "15Min", 50)
             if df.empty:
                 raise MarketDataError(f"No 15m data received for {epic}")
+            self._save_to_cache(cache_key, df)
             return df
         except Exception as e:
             logger.error(f"Error fetching 15m data: {e}")
@@ -91,11 +156,17 @@ class MarketDataProvider:
             ) from e
 
     def _fetch_granular_data(self, epic: str) -> pd.DataFrame:
+        cache_key = self._get_cache_key("5m", epic)
+        cached = self._load_from_cache(cache_key)
+        if cached is not None:
+            return cached
+
         try:
             # 24 points = 2 hours of 5m data
             df = self.client.fetch_historical_data(epic, "5Min", 24)
             if df.empty:
                 raise MarketDataError(f"No 5m data received for {epic}")
+            self._save_to_cache(cache_key, df)
             return df
         except Exception as e:
             logger.error(f"Error fetching 5m data: {e}")
@@ -104,11 +175,17 @@ class MarketDataProvider:
             ) from e
 
     def _fetch_timing_data(self, epic: str) -> pd.DataFrame:
+        cache_key = self._get_cache_key("1m", epic)
+        cached = self._load_from_cache(cache_key)
+        if cached is not None:
+            return cached
+
         try:
             # 15 points = 15 mins of 1m data
             df = self.client.fetch_historical_data(epic, "1Min", 15)
             if df.empty:
                 raise MarketDataError(f"No 1m data received for {epic}")
+            self._save_to_cache(cache_key, df)
             return df
         except Exception as e:
             logger.error(f"Error fetching 1m data: {e}")
@@ -166,17 +243,29 @@ class MarketDataProvider:
         return df, indicators
 
     def _fetch_vix_context(self) -> str:
+        cache_key = self._get_cache_key("vix", self.vix_epic)
+        cached = self._load_from_cache(cache_key)
+        if cached is not None:
+            return cached
+
         try:
-            vix_data = self.client.service.fetch_market_by_epic(self.vix_epic)
+            vix_data = self.client.get_market_info(self.vix_epic)
             if vix_data and "snapshot" in vix_data:
                 vix_bid = vix_data["snapshot"].get("bid")
                 if vix_bid:
-                    return f"VIX Level: {vix_bid} (Market Fear Index)\n"
+                    result = f"VIX Level: {vix_bid} (Market Fear Index)\n"
+                    self._save_to_cache(cache_key, result)
+                    return result
         except Exception as e:
             logger.warning(f"Failed to fetch VIX data: {e}")
         return ""
 
     def _fetch_sentiment_context(self, epic: str) -> str:
+        cache_key = self._get_cache_key("sentiment", epic)
+        cached = self._load_from_cache(cache_key)
+        if cached is not None:
+            return cached
+
         try:
             market_details = self.client.data_service.fetch_market_by_epic(epic)
             if market_details and "instrument" in market_details:
@@ -197,21 +286,29 @@ class MarketDataProvider:
                     elif short_pct > 70:
                         signal_hint = "BULLISH CONTRA (Retail is Crowded Short)"
 
-                    return (
+                    result = (
                         f"\n--- Client Sentiment (IG Markets - % of Accounts) ---\n"
                         f"Long: {long_pct}%\n"
                         f"Short: {short_pct}%\n"
                         f"Signal Implication: {signal_hint}\n"
                     )
+                    self._save_to_cache(cache_key, result)
+                    return result
         except Exception as e:
             logger.warning(f"Failed to fetch Client Sentiment: {e}")
         return ""
 
     def _fetch_news(self, epic: str, query: str = None) -> str:
         q = query if query else self._get_default_news_query(epic)
+        cache_key = self._get_cache_key("news", q)
+        cached = self._load_from_cache(cache_key)
+        if cached is not None:
+            return cached
+
         news_result = self.news_fetcher.fetch_news(q)
         if not news_result or "Error fetching news" in news_result:
             raise MarketDataError(f"Critical: Failed to fetch news for {q}")
+        self._save_to_cache(cache_key, news_result)
         return news_result
 
     def _get_default_news_query(self, epic: str) -> str:
