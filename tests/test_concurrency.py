@@ -95,6 +95,20 @@ def create_engine(epic, strategy_name, db_path, deal_id):
     )
     mock_ig_client.fetch_transaction_history_by_deal_id.return_value = mock_history_df
 
+    # Mock historical data for MarketDataProvider
+    mock_candles = pd.DataFrame(
+        {
+            "open": [100.0] * 50,
+            "high": [105.0] * 50,
+            "low": [95.0] * 50,
+            "close": [100.0] * 50,
+            "volume": [100] * 50,
+        }
+    )
+    # Needed for pandas_ta
+    mock_candles.index = pd.to_datetime([datetime.now()] * 50)
+    mock_ig_client.fetch_historical_data.return_value = mock_candles
+
     engine = StrategyEngine(
         epic,
         strategy_name=strategy_name,
@@ -120,8 +134,9 @@ def fast_sleep_side_effect(seconds):
     _real_sleep(seconds)
 
 
+@patch("src.strategy_engine.time.sleep", side_effect=fast_sleep_side_effect)
 @patch("src.trade_monitor_db.time.sleep", side_effect=fast_sleep_side_effect)
-def test_concurrent_trades(mock_sleep, temp_db_path, caplog):
+def test_concurrent_trades(mock_sleep_db, mock_sleep_engine, temp_db_path, caplog):
     """
     Simulates two overlapping trades on different instruments to ensure isolation.
     """

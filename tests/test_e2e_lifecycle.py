@@ -119,8 +119,8 @@ def test_trade_lifecycle_flow(lifecycle_db):
         "snapshot": {"bid": 99, "offer": 100}
     }  # Spread ok
 
-    # Patch _calculate_size to avoid account calls
-    with patch.object(StrategyEngine, "_calculate_size", return_value=1.0):
+    # Patch _calculate_size on TradeExecutor to avoid account calls
+    with patch("src.trade_executor.TradeExecutor._calculate_size", return_value=1.0):
         # Mock stream update to trigger immediately
         def mock_connect_and_subscribe(epic, callback):
             callback({"epic": epic, "bid": 99, "offer": 100})

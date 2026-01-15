@@ -2,10 +2,8 @@ import logging
 import time
 import threading
 from typing import Optional
-import pandas as pd
 
 # pandas_ta removed (moved to provider)
-from config import RISK_PER_TRADE_PERCENT, MIN_ACCOUNT_BALANCE
 from src.ig_client import IGClient
 from src.gemini_analyst import GeminiAnalyst, TradingSignal, Action, EntryType
 from src.news_fetcher import NewsFetcher
@@ -14,6 +12,7 @@ from src.trade_monitor_db import TradeMonitorDB
 from src.market_status import MarketStatus
 from src.stream_manager import StreamManager
 from src.market_data_provider import MarketDataProvider
+from src.trade_executor import TradeExecutor
 
 logger = logging.getLogger(__name__)
 
@@ -73,8 +72,16 @@ class StrategyEngine:
         # Initialize Data Provider
         self.data_provider = MarketDataProvider(self.client, self.news_fetcher)
 
-        self.vix_epic = "CC.D.VIX.USS.IP"
+        # Initialize Trade Executor
+        self.executor = TradeExecutor(
+            self.client,
+            self.trade_logger,
+            self.trade_monitor,
+            risk_scale=self.risk_scale,
+            min_size=self.min_size,
+        )
 
+        self.vix_epic = "CC.D.VIX.USS.IP"
         self.active_plan: Optional[TradingSignal] = None
         self.active_plan_id: Optional[int] = None
         self.position_open = False
@@ -385,12 +392,19 @@ class StrategyEngine:
                                         trigger_price = bid_snapshot
 
                                 if triggered:
-                                    self._place_market_order(
-                                        plan,
-                                        current_spread,
-                                        trigger_price,
+                                    # Optimistically set open to prevent re-entry logic during blocking execution
+                                    self.position_open = True
+                                    success = self.executor.execute_trade(
+                                        plan=plan,
+                                        trigger_price=trigger_price,
+                                        current_spread=current_spread,
+                                        row_id=self.active_plan_id,
                                         dry_run=self.dry_run,
                                     )
+
+                                    if not success:
+                                        self.position_open = False
+
                                     decision_made = True
                                     trading_active = False  # Stop looking once executed
 
@@ -418,194 +432,3 @@ class StrategyEngine:
             with self.price_lock:
                 self.current_bid = bid
                 self.current_offer = offer
-
-    def _calculate_size(self, entry: float, stop_loss: float) -> float:
-        try:
-            all_accounts = self.client.get_account_info()
-            balance = 0.0
-
-            if self.client.service.account_id and isinstance(
-                all_accounts, pd.DataFrame
-            ):
-                target_account_df = all_accounts[
-                    all_accounts["accountId"] == self.client.service.account_id
-                ]
-                if not target_account_df.empty:
-                    if "available" in target_account_df.columns:
-                        balance = float(target_account_df.iloc[0]["available"])
-                    elif "balance" in target_account_df.columns:
-                        val = target_account_df.iloc[0]["balance"]
-                        balance = (
-                            float(val.get("available", 0))
-                            if isinstance(val, dict)
-                            else float(val)
-                        )
-                else:
-                    logger.error(
-                        "Could not find target account in account list. Aborting."
-                    )
-                    return 0.0
-            elif isinstance(all_accounts, dict) and "accounts" in all_accounts:
-                for acc in all_accounts["accounts"]:
-                    if acc.get("accountId") == self.client.service.account_id:
-                        balance = float(
-                            acc.get("available")
-                            or acc.get("balance", {}).get("available", 0)
-                        )
-                        break
-
-            if balance <= 0:
-                return 0.0
-
-            stop_distance = abs(entry - stop_loss)
-            if stop_distance <= 0:
-                return 0.0
-
-            # 1. Calculate Standard Risk Size (Unclamped)
-            target_risk_amount = balance * RISK_PER_TRADE_PERCENT * self.risk_scale
-            standard_size = round(target_risk_amount / stop_distance, 2)
-
-            # 2. Check if Standard Trade is safe for the Floor
-            # We check the actual risk of the standard 1% size
-            if (
-                MIN_ACCOUNT_BALANCE <= 0
-                or (balance - target_risk_amount) >= MIN_ACCOUNT_BALANCE
-            ):
-                # Standard is safe. But we must trade at least broker min.
-                effective_size = max(standard_size, self.min_size)
-
-                # RE-CHECK safety of the broker min if standard_size was smaller than it
-                if (balance - (effective_size * stop_distance)) >= MIN_ACCOUNT_BALANCE:
-                    logger.info(
-                        f"Dynamic Sizing: Balance={balance}, Size={effective_size} (Standard/Min)"
-                    )
-                    return effective_size
-
-            # 3. Standard Trade (or min required for standard) Breaches Floor.
-            # Drop immediately to Broker Minimum (if it wasn't already tried above).
-            logger.warning(
-                f"Standard Risk would breach Floor (£{MIN_ACCOUNT_BALANCE}). "
-                "Attempting step-down to Broker Minimum."
-            )
-
-            min_risk = self.min_size * stop_distance
-            if (balance - min_risk) >= MIN_ACCOUNT_BALANCE:
-                logger.info(
-                    f"Dynamic Sizing: Balance={balance}, Size={self.min_size} (Step-Down to Min)"
-                )
-                return self.min_size
-
-            # 4. Even Broker Minimum breaches the floor.
-            logger.warning(
-                f"Even Broker Minimum Risk (£{min_risk:.2f}) would breach Floor (£{MIN_ACCOUNT_BALANCE}). "
-                "Aborting trade."
-            )
-            return 0.0
-
-        except Exception as e:
-            logger.error(f"Error calculating size: {e}. Defaulting to 0.0")
-            return 0.0
-
-    def _place_market_order(
-        self,
-        plan: TradingSignal,
-        current_spread: float,
-        trigger_price: float,
-        dry_run: bool,
-    ) -> bool:
-        try:
-            logger.info("Placing MARKET order...")
-            direction = "BUY" if plan.action == Action.BUY else "SELL"
-            deal_id = None
-            execution_price = trigger_price
-
-            if plan.stop_loss is None:
-                return False
-
-            # Adjust Stop Loss by widening it by the current spread
-            # This protects the trade from spread-induced stop-outs on high-spread markets.
-            original_sl = plan.stop_loss
-            adjusted_sl = original_sl
-            if plan.action == Action.BUY:
-                adjusted_sl = original_sl - current_spread
-            elif plan.action == Action.SELL:
-                adjusted_sl = original_sl + current_spread
-
-            logger.info(
-                f"Adjusting Stop Loss for spread ({current_spread}): {original_sl} -> {adjusted_sl}"
-            )
-
-            if self.strategy_name == "TEST_TRADE":
-                size = plan.size
-            else:
-                # Calculate size based on the ACTUAL entry (trigger_price) and the ADJUSTED stop loss
-                # This ensures total risk amount is constant.
-                size = self._calculate_size(trigger_price, adjusted_sl)
-
-                # Check for abort condition (Size too small)
-                if size <= 0:
-                    logger.warning(
-                        "Trade Aborted: Size is 0 (Risk/Floor limits reached)."
-                    )
-
-                    # Update DB to show we tried but aborted
-                    if self.active_plan_id:
-                        self.trade_logger.update_trade_status(
-                            row_id=self.active_plan_id,
-                            outcome="ABORTED_RISK",
-                            deal_id=None,
-                        )
-                    return False
-
-            take_profit_level = plan.take_profit
-            if plan.use_trailing_stop:
-                take_profit_level = None
-
-            if dry_run:
-                logger.info(
-                    f"DRY RUN: {direction} {size} {self.epic} at {trigger_price} (Stop: {adjusted_sl})"
-                )
-                outcome = "DRY_RUN_PLACED"
-            else:
-                confirmation = self.client.place_spread_bet_order(
-                    epic=self.epic,
-                    direction=direction,
-                    size=size,
-                    level=trigger_price,
-                    stop_level=adjusted_sl,
-                    limit_level=take_profit_level,
-                )
-                outcome = "LIVE_PLACED"
-                if confirmation and "dealId" in confirmation:
-                    deal_id = confirmation["dealId"]
-                    if confirmation.get("level"):
-                        execution_price = float(confirmation["level"])
-                        logger.info(f"Order filled at {execution_price}")
-
-            self.position_open = True
-
-            if self.active_plan_id:
-                self.trade_logger.update_trade_status(
-                    row_id=self.active_plan_id,
-                    outcome=outcome,
-                    deal_id=deal_id,
-                    size=size,
-                    entry=execution_price,
-                    stop_loss=adjusted_sl,  # Update the DB with the adjusted SL
-                )
-
-            if not dry_run and deal_id:
-                self.trade_monitor.monitor_trade(
-                    deal_id,
-                    self.epic,
-                    entry_price=execution_price,
-                    stop_loss=adjusted_sl,
-                    atr=plan.atr,
-                    use_trailing_stop=plan.use_trailing_stop,
-                )
-
-            return True
-
-        except Exception as e:
-            logger.error(f"Failed to execute trade: {e}")
-            return False
