@@ -31,7 +31,8 @@ COPY pyproject.toml uv.lock package.json package-lock.json ./
 COPY web_ui/requirements.txt web_ui/pyproject.toml ./web_ui/
 
 # Install Node.js dependencies (for stream service)
-RUN npm install
+# Use 'ci' (Clean Install) for reproducible builds and to avoid interactive prompts/hangs
+RUN npm ci --no-audit --no-fund
 
 # Install Python dependencies using uv
 # --frozen ensures we stick to the lockfile

@@ -8,7 +8,13 @@
 - [x] **Granular Price History**: Included last 2 hours of **5-minute candles** in the AI prompt context to help AI see specific "wick rejections" that 15-minute candles hide.
 
 ## Trading Strategy Enhancements
-
+- [x] **Active Re-evaluation (Smart WAIT)**:
+    - Update `TradingSignal` schema to include `validity_time_minutes`.
+    - If validity expires: Re-trigger `_run_analysis()` automatically.
+    - Uniform handling for both Trade TTL and WAIT Cooldowns.
+- [ ] **Dynamic Breakeven Trigger**:
+    - Allow Analyst to specify `breakeven_trigger_r` (e.g., 1.0, 1.5, 2.0, or 0 to disable) in the `TradingSignal`.
+    - Goal: Optimize risk management for different regimes (e.g., tight BE for breakouts, wide BE for range trading).
 ## Architecture & Infrastructure
 - [ ] **Single Stream Architecture**: 
     - Decouple "Data Recording" from "Trade Execution".

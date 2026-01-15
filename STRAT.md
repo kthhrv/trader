@@ -6,8 +6,7 @@ The bot acts as an **Intraday Breakout & Momentum System**, targeting the openin
 ## 1. Market Selection
 We trade high-liquidity indices during their specific "Open" windows (first 90 minutes).
 *   **Tier A (Aggr):** Nasdaq 100, DAX 40.
-*   **Tier B (Std):** FTSE 100, S&P 500, Nikkei 225.
-*   **Tier C (Safe):** ASX 200 (Lower liquidity, reduced size).
+*   **Tier B (Std):** FTSE 100, S&P 500, Nikkei 225, ASX 200.
 
 ## 2. Risk Management (The "Brakes")
 *   **Base Risk:** 1.0% of Account Balance per trade.
