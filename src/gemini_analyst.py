@@ -69,6 +69,11 @@ class TradingSignal(BaseModel):
         description="Whether to use a dynamic trailing stop (True) or a fixed take profit (False). Set to True for breakout/trend strategies to maximize runs. Set to False for range/mean-reversion strategies where price is expected to reverse at target."
     )
 
+    validity_time_minutes: int = Field(
+        default=30,
+        description="For BUY/SELL: The Time-To-Live (TTL) in minutes for the Pending Order. If entry not triggered by then, the plan expires. For WAIT: The cooldown duration in minutes before re-analyzing the market (e.g. 5, 15, 30).",
+    )
+
     confidence: str = Field(
         description="Confidence level of the analysis (e.g., 'high', 'medium', 'low')."
     )
@@ -114,6 +119,9 @@ class GeminiAnalyst:
             - **Take Profit / Management:**
                 - **Trend Days:** Use `use_trailing_stop=True` for uncapped upside.
                 - **Range Days:** Use `use_trailing_stop=False` and target a fixed Resistance/Support level (R:R > 1.5).
+            - **Plan Validity (Time):**
+                - **BUY/SELL:** Set `validity_time_minutes` to 15-30 mins for fast breakout setups. If the breakout doesn't happen quickly, the setup is invalid. Use 60 mins only for major structural levels.
+                - **WAIT:** Set `validity_time_minutes` to indicate when to re-check. E.g., 5-15 mins if price is coiling and a breakout is imminent. 30-60 mins if market is dead/choppy.
 
             ### 3. Contrarian Checks
             - **Retail Sentiment:** If >70% Long, be cautious of Longs (Crowded Trade). If >70% Short, look for Short Squeezes.

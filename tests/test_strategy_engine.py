@@ -2,7 +2,8 @@ import pytest
 from unittest.mock import MagicMock, patch
 import pandas as pd
 import logging
-from src.strategy_engine import StrategyEngine, Action, TradingSignal, EntryType
+from src.strategy_engine import StrategyEngine
+from src.gemini_analyst import Action, TradingSignal, EntryType
 
 
 @pytest.fixture

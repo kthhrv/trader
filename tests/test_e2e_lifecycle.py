@@ -3,7 +3,8 @@ import sqlite3
 import os
 import pandas as pd
 from unittest.mock import MagicMock, patch
-from src.strategy_engine import StrategyEngine, Action, TradingSignal, EntryType
+from src.strategy_engine import StrategyEngine
+from src.gemini_analyst import Action, TradingSignal, EntryType
 from src.trade_logger_db import TradeLoggerDB
 from src.trade_monitor_db import TradeMonitorDB
 from src.database import init_db

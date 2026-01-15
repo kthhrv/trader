@@ -4,7 +4,8 @@ import logging
 import time
 from threading import Thread
 
-from src.strategy_engine import StrategyEngine, Action, TradingSignal, EntryType
+from src.strategy_engine import StrategyEngine
+from src.gemini_analyst import Action, TradingSignal, EntryType
 from tests.mocks import (
     MockIGClient,
     MockGeminiAnalyst,

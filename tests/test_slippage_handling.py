@@ -1,7 +1,9 @@
 import pytest
+import time
 from unittest.mock import MagicMock, patch, ANY
 import pandas as pd
-from src.strategy_engine import StrategyEngine, Action, TradingSignal, EntryType
+from src.strategy_engine import StrategyEngine
+from src.gemini_analyst import Action, TradingSignal, EntryType
 
 
 @pytest.fixture
@@ -48,6 +50,8 @@ def test_slippage_reduces_size_fixed_stop_loss(mock_components, caplog):
         trade_logger=mock_trade_logger,
         stream_manager=mock_stream_manager,
     )
+    # Prevent premature expiration
+    engine.last_analysis_time = time.time()
 
     # Setup plan: Entry 1000, Stop 900. Risk Distance = 100 pts.
     # Initial risk amount calculation (mocked balance 10000 * 1% = 100) -> Size = 1.0

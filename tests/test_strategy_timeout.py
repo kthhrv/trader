@@ -1,4 +1,5 @@
 import pytest
+import time
 from unittest.mock import MagicMock
 import os
 import tempfile
@@ -30,6 +31,8 @@ def test_timeout_logging(test_db):
         trade_logger=trade_logger,
         stream_manager=mock_stream_manager,
     )
+    # Prevent immediate re-evaluation
+    engine.last_analysis_time = time.time()
 
     engine.active_plan = TradingSignal(
         ticker="GBPUSD",

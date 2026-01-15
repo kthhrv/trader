@@ -5,7 +5,7 @@ from typing import Optional
 
 # pandas_ta removed (moved to provider)
 from src.ig_client import IGClient
-from src.gemini_analyst import GeminiAnalyst, TradingSignal, Action, EntryType
+from src.gemini_analyst import GeminiAnalyst, TradingSignal, Action
 from src.news_fetcher import NewsFetcher
 from src.trade_logger_db import TradeLoggerDB
 from src.trade_monitor_db import TradeMonitorDB
@@ -89,6 +89,7 @@ class StrategyEngine:
         self.current_offer: float = 0.0
         self.price_lock = threading.Lock()  # Lock for synchronizing price updates
         self.last_skipped_log_time: float = 0.0  # For rate-limiting skipped logs
+        self.last_analysis_time: float = 0.0
 
     def generate_plan(self):
         """
@@ -102,10 +103,14 @@ class StrategyEngine:
             return
 
         logger.info(f"Generating plan for {self.epic} ({self.strategy_name})...")
+        self._run_analysis()
 
+    def _run_analysis(self):
+        """
+        Internal method to run the analysis pipeline and update active_plan.
+        """
         try:
             # 1. Get Market Context from Provider
-            # This handles fetching Daily, 15m, 5m, 1m, News, Indicators, etc.
             market_context = self.data_provider.get_market_context(
                 self.epic, self.news_query, self.strategy_name
             )
@@ -114,6 +119,7 @@ class StrategyEngine:
             signal = self.analyst.analyze_market(
                 market_context, strategy_name=self.strategy_name
             )
+            self.last_analysis_time = time.time()
 
             current_spread = 0.0
             try:
@@ -130,11 +136,6 @@ class StrategyEngine:
                 pass
 
             if signal:
-                # We need a fallback ATR if it wasn't parsed correctly,
-                # but the Provider now handles the heavy lifting.
-                # If signal.atr is missing, we might need to parse it from the context or re-calculate?
-                # Ideally Gemini extracts it.
-                # For safety, let's keep it simple: if signal.atr is None, it might be 0.
                 if signal.atr is None or signal.atr == 0:
                     logger.warning("ATR missing from signal. Using default 0.0.")
                     signal.atr = 0.0
@@ -175,42 +176,24 @@ class StrategyEngine:
                     )
                 else:
                     logger.info(
-                        "PLAN RESULT: Gemini advised WAIT. Proceeding to monitor mode for data collection."
+                        "PLAN RESULT: Gemini advised WAIT. Proceeding to monitor mode for data collection/re-evaluation."
                     )
                     self.active_plan = signal
-                    self.active_plan_id = self.trade_logger.log_trade(
-                        epic=self.epic,
-                        plan=signal,
-                        outcome="WAIT",
-                        spread_at_entry=current_spread,
-                        is_dry_run=self.dry_run,
-                        entry_type=signal.entry_type.value
-                        if signal.entry_type
-                        else "UNKNOWN",
-                    )
+                    # Only log initial wait, avoid spamming DB on re-eval loops
+                    if not self.active_plan_id:
+                        self.active_plan_id = self.trade_logger.log_trade(
+                            epic=self.epic,
+                            plan=signal,
+                            outcome="WAIT",
+                            spread_at_entry=current_spread,
+                            is_dry_run=self.dry_run,
+                            entry_type=signal.entry_type.value
+                            if signal.entry_type
+                            else "UNKNOWN",
+                        )
                 logger.info(f"reasoning: {signal.reasoning}")
             else:
                 logger.error("PLAN RESULT: Gemini signal generation failed.")
-                error_signal = TradingSignal(
-                    ticker=self.epic,
-                    action=Action.ERROR,
-                    entry=0.0,
-                    stop_loss=0.0,
-                    take_profit=0.0,
-                    confidence="none",
-                    reasoning="AI Analysis failed to generate a response.",
-                    size=0.0,
-                    atr=0.0,
-                    entry_type=EntryType.INSTANT,
-                    use_trailing_stop=False,
-                )
-                self.trade_logger.log_trade(
-                    epic=self.epic,
-                    plan=error_signal,
-                    outcome="AI_ERROR",
-                    spread_at_entry=current_spread,
-                    is_dry_run=self.dry_run,
-                )
                 self.active_plan = None
 
         except Exception as e:
@@ -314,10 +297,48 @@ class StrategyEngine:
             # Main Loop: Runs until collection time expires or user interrupt
             while (time.time() - start_time) < collection_seconds:
                 elapsed = time.time() - start_time
+                now = time.time()
+
+                # --- Active Re-evaluation Logic (Validity Check) ---
+                if self.active_plan and not self.position_open and not decision_made:
+                    validity_seconds = (
+                        getattr(self.active_plan, "validity_time_minutes", 30) * 60
+                    )
+
+                    if (now - self.last_analysis_time) > validity_seconds:
+                        logger.info(
+                            f"⏳ Plan Validity Expired ({validity_seconds}s). Re-analyzing market..."
+                        )
+
+                        # If we were PENDING, log expiration outcome before overwritting
+                        if self.active_plan.action != Action.WAIT:
+                            if self.active_plan_id:
+                                self.trade_logger.update_trade_status(
+                                    row_id=self.active_plan_id,
+                                    outcome="EXPIRED",
+                                    deal_id=None,
+                                )
+
+                        # Re-Analyze
+                        self._run_analysis()
+
+                        if self.active_plan:
+                            logger.info(
+                                f"🔄 New Plan Generated: {self.active_plan.action}"
+                            )
+                            # Reset decision/active flags to allow trading if new plan is valid
+                            if self.active_plan.action != Action.WAIT:
+                                decision_made = False
+                                trading_active = True
+                            else:
+                                # If new plan is WAIT, we just loop and wait for next validity check
+                                trading_active = False
 
                 # --- Trading Logic (Only if within timeout and no decision yet) ---
                 if trading_active and not self.position_open and not decision_made:
-                    # Check for Trading Timeout
+                    plan = self.active_plan
+
+                    # Check for Trading Timeout (Only applies if we haven't traded yet)
                     if elapsed > timeout_seconds:
                         logger.info(
                             f"Strategy for {self.epic} TRADING timed out after {timeout_seconds}s. No trade executed. continuing data collection..."

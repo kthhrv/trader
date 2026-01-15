@@ -1534,6 +1534,7 @@ def main():
             print(f"Stop Loss:   {plan.stop_loss}")
             print(f"Take Profit: {plan.take_profit}")
             print(f"Size:        {plan.size}")
+            print(f"Validity:    {getattr(plan, 'validity_time_minutes', 'N/A')} min")
             print(f"Confidence:  {plan.confidence}")
             print(f"{'-' * 60}")
             print(f"Reasoning:\n{plan.reasoning}")
