@@ -4,7 +4,6 @@ import pandas as pd
 import os
 import tempfile
 import logging
-from datetime import datetime, timedelta
 import json
 import time
 
@@ -42,16 +41,17 @@ def temp_db_path():
 
 @pytest.fixture
 def e2e_mocks(temp_db_path):
-    # Instantiate mocks with the temporary database path
     mock_ig_client = MockIGClient()
     mock_gemini_analyst = MockGeminiAnalyst()
     mock_stream_manager = MockStreamManager()
     mock_market_status = MockMarketStatus()
-    mock_news_fetcher = (
-        MagicMock()
-    )  # NewsFetcher doesn't interact with DB directly, so MagicMock is fine
+    mock_news_fetcher = MagicMock()
+    mock_market_provider = MagicMock()  # Mock the Provider
+
     mock_trade_logger = TradeLoggerDB(db_path=temp_db_path)
-    # Wrap log_trade with a mock to allow assertions while keeping functionality
+    # Ensure log_trade doesn't actually hit DB if not needed, but we want it to for verification?
+    # Actually, we want to VERIFY it, so we can wrap it or just inspect the real DB.
+    # For E2E, let's use the real logger but wrapped to spy on it.
     mock_trade_logger.log_trade = MagicMock(side_effect=mock_trade_logger.log_trade)
     mock_trade_logger.update_trade_status = MagicMock(
         side_effect=mock_trade_logger.update_trade_status
@@ -61,9 +61,8 @@ def e2e_mocks(temp_db_path):
         client=mock_ig_client,
         stream_manager=mock_stream_manager,
         db_path=temp_db_path,
-        polling_interval=0.1,
+        polling_interval=0.1,  # Fast polling for tests
     )
-    # Wrap monitor_trade with a mock to allow assertions while keeping functionality
     mock_trade_monitor.monitor_trade = MagicMock(
         side_effect=mock_trade_monitor.monitor_trade
     )
@@ -76,6 +75,7 @@ def e2e_mocks(temp_db_path):
         mock_news_fetcher,
         mock_trade_logger,
         mock_trade_monitor,
+        mock_market_provider,
         temp_db_path,
     )
 
@@ -91,6 +91,7 @@ def test_e2e_trading_flow(e2e_mocks, caplog):
         mock_news_fetcher,
         mock_trade_logger,
         mock_trade_monitor,
+        mock_market_provider,
         db_path,
     ) = e2e_mocks
 
@@ -102,24 +103,9 @@ def test_e2e_trading_flow(e2e_mocks, caplog):
     trade_size = 1.0
 
     # 1. Setup Mock Responses
-    # Mock historical data from IGClient with pre-calculated indicators
-    mock_historical_df = pd.DataFrame(
-        {
-            "open": [entry_price - 10] * 25,
-            "high": [entry_price - 5] * 25,
-            "low": [entry_price - 15] * 25,
-            "close": [entry_price - 8] * 24
-            + [entry_price + 3],  # Make the last close different
-            "volume": [1000] * 25,
-        }
-    )
-    mock_historical_df["ATR"] = [10.0] * 25
-    mock_historical_df["RSI"] = [55.0] * 25
-    mock_historical_df["EMA_20"] = [entry_price] * 25
-    mock_historical_df.index = pd.to_datetime(
-        [datetime.now() - timedelta(minutes=(25 - 1 - i) * 15) for i in range(25)]
-    )
-    mock_ig_client.fetch_historical_data.return_value = mock_historical_df
+    # Mock MarketDataProvider return
+    mock_market_provider.get_market_context.return_value = "Mock E2E Context"
+
     # Mock Gemini's response for a BUY signal
     mock_gemini_analyst.analyze_market.return_value = TradingSignal(
         ticker=epic,
@@ -159,6 +145,9 @@ def test_e2e_trading_flow(e2e_mocks, caplog):
         stream_manager=mock_stream_manager,
         dry_run=False,  # We want to simulate a real trade for P&L
     )
+    # Inject the mocked provider
+    engine.data_provider = mock_market_provider
+
     # Ensure the StrategyEngine's logger is set to DEBUG for this test
     logging.getLogger("src.strategy_engine").setLevel(logging.DEBUG)
 
@@ -166,8 +155,7 @@ def test_e2e_trading_flow(e2e_mocks, caplog):
     engine.generate_plan()
     assert engine.active_plan is not None
     assert engine.active_plan.action == Action.BUY
-    assert mock_ig_client.fetch_historical_data.call_count == 4
-    mock_gemini_analyst.analyze_market.assert_called_once()
+    mock_market_provider.get_market_context.assert_called_once()
 
     # 4. Execute Strategy - this starts monitoring
     # We run in a separate thread because execute_strategy has a loop

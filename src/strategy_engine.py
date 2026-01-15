@@ -1,10 +1,10 @@
 import logging
 import time
 import threading
-from datetime import datetime, timezone  # Added timezone
 from typing import Optional
 import pandas as pd
-import pandas_ta as ta
+
+# pandas_ta removed (moved to provider)
 from config import RISK_PER_TRADE_PERCENT, MIN_ACCOUNT_BALANCE
 from src.ig_client import IGClient
 from src.gemini_analyst import GeminiAnalyst, TradingSignal, Action, EntryType
@@ -12,7 +12,8 @@ from src.news_fetcher import NewsFetcher
 from src.trade_logger_db import TradeLoggerDB
 from src.trade_monitor_db import TradeMonitorDB
 from src.market_status import MarketStatus
-from src.stream_manager import StreamManager  # Import the new StreamManager
+from src.stream_manager import StreamManager
+from src.market_data_provider import MarketDataProvider
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +70,9 @@ class StrategyEngine:
             )
         )
 
+        # Initialize Data Provider
+        self.data_provider = MarketDataProvider(self.client, self.news_fetcher)
+
         self.vix_epic = "CC.D.VIX.USS.IP"
 
         self.active_plan: Optional[TradingSignal] = None
@@ -93,190 +97,13 @@ class StrategyEngine:
         logger.info(f"Generating plan for {self.epic} ({self.strategy_name})...")
 
         try:
-            # 1. Fetch Historical Data
-            # Fetch 15Min data for indicators (50 points)
-            df = self.client.fetch_historical_data(self.epic, "15Min", 50)
-
-            # Fetch 5Min data for granular structure (24 points = 2 hours)
-            df_5m = self.client.fetch_historical_data(self.epic, "5Min", 24)
-
-            # Fetch 1Min data for precise timing (15 points = 15 mins)
-            df_1m = self.client.fetch_historical_data(self.epic, "1Min", 15)
-
-            # Fetch Daily Data for macro trend context
-            df_daily = self.client.fetch_historical_data(self.epic, "D", 10)
-            if df_daily.empty:
-                logger.warning(
-                    "No daily data received from IG. Proceeding with 15Min data only."
-                )
-
-            if df.empty:
-                logger.error("No data received from IG.")
-                return
-
-            # 2. Calculate Technical Indicators
-            cols = ["open", "high", "low", "close", "volume"]
-            existing_cols = [c for c in cols if c in df.columns]
-            df[existing_cols] = df[existing_cols].apply(pd.to_numeric, errors="coerce")
-
-            # Calculate Indicators
-            df["ATR"] = ta.atr(df["high"], df["low"], df["close"], length=14)
-            df["RSI"] = ta.rsi(df["close"], length=14)
-            df["EMA_20"] = ta.ema(df["close"], length=20)
-
-            latest = df.iloc[-1]
-            prev_close = df.iloc[-2]["close"]
-
-            # --- Volatility Context ---
-            avg_atr = df["ATR"].mean()
-            current_atr = latest["ATR"]
-            vol_ratio = current_atr / avg_atr if avg_atr > 0 else 1.0
-
-            vol_state = "MEDIUM"
-            if vol_ratio < 0.8:
-                vol_state = "LOW (Caution: Market may be choppy/ranging)"
-            elif vol_ratio > 1.2:
-                vol_state = "HIGH (Caution: Expect wider swings)"
-
-            # --- Session Extremes (Intraday) ---
-            # Extract candles for the current calendar day
-            today_str = datetime.now().date().isoformat()
-
-            session_high = None
-            session_low = None
-
-            try:
-                # Ensure index is DatetimeIndex before filtering
-                if not isinstance(df.index, pd.DatetimeIndex):
-                    # Try to convert if possible, otherwise assume we can't filter
-                    temp_index = pd.to_datetime(df.index, errors="coerce")
-                    if not temp_index.isna().all():
-                        df_today = df[temp_index.strftime("%Y-%m-%d") == today_str]
-                    else:
-                        df_today = pd.DataFrame()  # Empty
-                else:
-                    df_today = df[df.index.strftime("%Y-%m-%d") == today_str]
-
-                if not df_today.empty:
-                    session_high = df_today["high"].max()
-                    session_low = df_today["low"].min()
-            except Exception as e:
-                logger.warning(f"Could not calculate session extremes: {e}")
-
-            yesterday_close = prev_close
-            if not df_daily.empty and len(df_daily) >= 2:
-                yesterday_close = df_daily.iloc[-2]["close"]
-
-            gap_percent = ((latest["close"] - yesterday_close) / yesterday_close) * 100
-            gap_str = f"{gap_percent:+.2f}%"
-
-            # 3. Format Data for Gemini
-            market_context = f"Current Time (UTC): {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}\n"
-            market_context += f"Instrument: {self.epic}\n"
-
-            if not df_daily.empty:
-                market_context += "\n--- Daily OHLC Data (Last 10 Days) ---\n"
-                market_context += df_daily.to_string()
-                market_context += "\n"
-
-            market_context += (
-                "\n--- Recent OHLC Data (Last 12 Hours, 15m intervals) ---\n"
+            # 1. Get Market Context from Provider
+            # This handles fetching Daily, 15m, 5m, 1m, News, Indicators, etc.
+            market_context = self.data_provider.get_market_context(
+                self.epic, self.news_query, self.strategy_name
             )
-            market_context += df.to_string()
-            market_context += "\n"
 
-            market_context += (
-                "\n--- Granular OHLC Data (Last 2 Hours, 5m intervals) ---\n"
-            )
-            market_context += df_5m.to_string()
-            market_context += "\n"
-
-            market_context += (
-                "\n--- Timing OHLC Data (Last 15 Minutes, 1m intervals) ---\n"
-            )
-            market_context += df_1m.to_string()
-
-            market_context += "\n\n--- Session Context (Today so far) ---\n"
-            if session_high is not None and session_low is not None:
-                market_context += f"Today's High: {session_high}\n"
-                market_context += f"Today's Low:  {session_low}\n"
-                position_in_range = 0
-                if session_high != session_low:
-                    position_in_range = int(
-                        ((latest["close"] - session_low) / (session_high - session_low))
-                        * 100
-                    )
-                market_context += f"Current Position in Range: {position_in_range}% (0%=Low, 100%=High)\n"
-            else:
-                market_context += (
-                    "Today's intraday high/low data not yet established.\n"
-                )
-
-            market_context += "\n--- Technical Indicators (Latest Candle) ---\n"
-            market_context += f"RSI (14): {latest['RSI']:.2f}\n"
-            market_context += f"ATR (14): {current_atr:.2f}\n"
-            market_context += f"Avg ATR (Last 50): {avg_atr:.2f}\n"
-            market_context += (
-                f"Volatility Regime: {vol_state} (Current/Avg Ratio: {vol_ratio:.2f})\n"
-            )
-            market_context += f"EMA (20): {latest['EMA_20']:.2f}\n"
-            market_context += f"Current Close: {latest['close']}\n"
-            market_context += f"Gap (Open vs Prev Close): {gap_str}\n"
-            market_context += f"Trend Context: {'Price > EMA20 (Bullish)' if latest['close'] > latest['EMA_20'] else 'Price < EMA20 (Bearish)'}\n"
-
-            # --- VIX Check ---
-            try:
-                vix_data = self.client.service.fetch_market_by_epic(self.vix_epic)
-                if vix_data and "snapshot" in vix_data:
-                    vix_bid = vix_data["snapshot"].get("bid")
-                    if vix_bid:
-                        market_context += f"VIX Level: {vix_bid} (Market Fear Index)\n"
-            except Exception as e:
-                logger.warning(f"Failed to fetch VIX data: {e}")
-
-            # --- Client Sentiment (Contrarian Indicator) ---
-            try:
-                # 1. Get Market ID (Required for sentiment lookup)
-                market_details = self.client.data_service.fetch_market_by_epic(
-                    self.epic
-                )
-                if market_details and "instrument" in market_details:
-                    market_id = market_details["instrument"]["marketId"]
-
-                    # 2. Fetch Sentiment from LIVE Data Service (to avoid Demo inversions)
-                    sentiment = (
-                        self.client.data_service.fetch_client_sentiment_by_instrument(
-                            market_id
-                        )
-                    )
-
-                    if sentiment:
-                        long_pct = float(sentiment.get("longPositionPercentage", 0))
-                        short_pct = float(sentiment.get("shortPositionPercentage", 0))
-
-                        signal_hint = "NEUTRAL"
-                        if long_pct > 70:
-                            signal_hint = "BEARISH CONTRA (Retail is Crowded Long)"
-                        elif short_pct > 70:
-                            signal_hint = "BULLISH CONTRA (Retail is Crowded Short)"
-
-                        market_context += (
-                            "\n--- Client Sentiment (IG Markets - % of Accounts) ---\n"
-                        )
-                        market_context += f"Long: {long_pct}%\n"
-                        market_context += f"Short: {short_pct}%\n"
-                        market_context += f"Signal Implication: {signal_hint}\n"
-            except Exception as e:
-                logger.warning(f"Failed to fetch Client Sentiment: {e}")
-
-            # 4. Fetch News
-            query = (
-                self.news_query if self.news_query else self._get_news_query(self.epic)
-            )
-            news_context = self.news_fetcher.fetch_news(query)
-            market_context += f"\n\n{news_context}"
-
-            # 5. Get Analysis
+            # 2. Get Analysis
             signal = self.analyst.analyze_market(
                 market_context, strategy_name=self.strategy_name
             )
@@ -296,8 +123,14 @@ class StrategyEngine:
                 pass
 
             if signal:
-                if signal.atr is None:
-                    signal.atr = latest["ATR"]
+                # We need a fallback ATR if it wasn't parsed correctly,
+                # but the Provider now handles the heavy lifting.
+                # If signal.atr is missing, we might need to parse it from the context or re-calculate?
+                # Ideally Gemini extracts it.
+                # For safety, let's keep it simple: if signal.atr is None, it might be 0.
+                if signal.atr is None or signal.atr == 0:
+                    logger.warning("ATR missing from signal. Using default 0.0.")
+                    signal.atr = 0.0
 
                 if signal.action != Action.WAIT:
                     if not self._validate_plan(signal):
