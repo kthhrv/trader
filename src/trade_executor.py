@@ -140,6 +140,7 @@ class TradeExecutor:
         try:
             all_accounts = self.client.get_account_info()
             balance = 0.0
+            available = 0.0
 
             if self.client.service.account_id and isinstance(
                 all_accounts, pd.DataFrame
@@ -148,15 +149,9 @@ class TradeExecutor:
                     all_accounts["accountId"] == self.client.service.account_id
                 ]
                 if not target_account_df.empty:
-                    if "available" in target_account_df.columns:
-                        balance = float(target_account_df.iloc[0]["available"])
-                    elif "balance" in target_account_df.columns:
-                        val = target_account_df.iloc[0]["balance"]
-                        balance = (
-                            float(val.get("available", 0))
-                            if isinstance(val, dict)
-                            else float(val)
-                        )
+                    # 'balance' is the cash value. 'available' is equity minus margin.
+                    balance = float(target_account_df.iloc[0].get("balance", 0))
+                    available = float(target_account_df.iloc[0].get("available", 0))
                 else:
                     logger.error(
                         "Could not find target account in account list. Aborting."
@@ -166,10 +161,19 @@ class TradeExecutor:
                 for acc in all_accounts["accounts"]:
                     if acc.get("accountId") == self.client.service.account_id:
                         balance = float(
-                            acc.get("available")
-                            or acc.get("balance", {}).get("available", 0)
+                            acc.get("balance", {}).get("available", 0)
+                            if isinstance(acc.get("balance"), dict)
+                            else acc.get("balance", 0)
                         )
+                        available = float(acc.get("available", 0))
                         break
+
+            # 1. Broker Liquidity Check
+            if available <= 0:
+                logger.warning(
+                    f"Aborting: No available funds ({available}) for margin."
+                )
+                return 0.0
 
             if balance <= 0:
                 return 0.0
@@ -178,11 +182,11 @@ class TradeExecutor:
             if stop_distance <= 0:
                 return 0.0
 
-            # 1. Calculate Standard Risk Size (Unclamped)
+            # 2. Calculate Standard Risk Size (Unclamped)
             target_risk_amount = balance * RISK_PER_TRADE_PERCENT * self.risk_scale
             standard_size = round(target_risk_amount / stop_distance, 2)
 
-            # 2. Check if Standard Trade is safe for the Floor
+            # 3. Check if Standard Trade is safe for the Floor (Using Cash Balance)
             if (
                 MIN_ACCOUNT_BALANCE <= 0
                 or (balance - target_risk_amount) >= MIN_ACCOUNT_BALANCE
@@ -190,16 +194,16 @@ class TradeExecutor:
                 # Standard is safe. But we must trade at least broker min.
                 effective_size = max(standard_size, self.min_size)
 
-                # RE-CHECK safety of the broker min
+                # RE-CHECK safety of the broker min against Cash Balance
                 if (balance - (effective_size * stop_distance)) >= MIN_ACCOUNT_BALANCE:
                     logger.info(
-                        f"Dynamic Sizing: Balance={balance}, Size={effective_size} (Standard/Min)"
+                        f"Dynamic Sizing: Balance={balance}, Available={available}, Size={effective_size} (Standard/Min)"
                     )
                     return effective_size
 
-            # 3. Standard Trade Breaches Floor. Try Min.
+            # 4. Standard Trade Breaches Floor. Try Min.
             logger.warning(
-                f"Standard Risk would breach Floor (£{MIN_ACCOUNT_BALANCE}). "
+                f"Standard Risk would breach Floor (£{MIN_ACCOUNT_BALANCE}) based on Cash Balance. "
                 "Attempting step-down to Broker Minimum."
             )
 
@@ -210,7 +214,7 @@ class TradeExecutor:
                 )
                 return self.min_size
 
-            # 4. Even Broker Minimum breaches the floor.
+            # 5. Even Broker Minimum breaches the floor.
             logger.warning(
                 f"Even Broker Minimum Risk (£{min_risk:.2f}) would breach Floor (£{MIN_ACCOUNT_BALANCE}). "
                 "Aborting trade."

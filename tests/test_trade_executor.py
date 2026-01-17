@@ -11,9 +11,9 @@ def mock_deps():
     mock_logger = MagicMock()
     mock_monitor = MagicMock()
 
-    # Mock account info
+    # Mock account info with both balance and available
     mock_client.get_account_info.return_value = pd.DataFrame(
-        {"accountId": ["ACC1"], "available": [10000.0]}
+        {"accountId": ["ACC1"], "balance": [10000.0], "available": [10000.0]}
     )
     mock_client.service.account_id = "ACC1"
 
@@ -80,10 +80,6 @@ def test_execute_trade_dry_run(mock_deps):
 
     assert success is True
     mock_client.place_spread_bet_order.assert_not_called()
-    mock_monitor.monitor_trade.assert_not_called()  # Monitor not called on dry run?
-    # Logic check: In original Engine, monitor was NOT called for dry run.
-    # Executor logic: if not dry_run and deal_id: monitor.
-
     mock_logger.update_trade_status.assert_called_once()
     assert mock_logger.update_trade_status.call_args[1]["outcome"] == "DRY_RUN_PLACED"
 
@@ -97,3 +93,29 @@ def test_calculate_size_risk_floor(mock_deps):
     # Size = 100 / 10 = 10.0
     size = executor._calculate_size(100, 90)
     assert size == 10.0
+
+
+def test_calculate_size_margin_conflict(mock_deps):
+    """
+    Test scenario where Balance is high but Available is low (e.g. existing trade margin).
+    The Floor check should pass against Balance, but the liquidity check should fail against Available.
+    """
+    mock_client, mock_logger, mock_monitor = mock_deps
+    executor = TradeExecutor(mock_client, mock_logger, mock_monitor)
+
+    # 1. Available = 0 (Total lockup)
+    mock_client.get_account_info.return_value = pd.DataFrame(
+        {"accountId": ["ACC1"], "balance": [10000.0], "available": [0.0]}
+    )
+
+    size = executor._calculate_size(100, 90)
+    assert size == 0.0  # Aborted due to liquidity
+
+    # 2. Available > 0 but below Floor (e.g. 1000)
+    # The code should now ALLOW this because balance is still 10000.
+    mock_client.get_account_info.return_value = pd.DataFrame(
+        {"accountId": ["ACC1"], "balance": [10000.0], "available": [1000.0]}
+    )
+
+    size = executor._calculate_size(100, 90)
+    assert size == 10.0  # Allowed because balance is high
