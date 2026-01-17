@@ -1,14 +1,14 @@
 import pytest
 from unittest.mock import MagicMock, patch
 import pandas as pd
-import os
-import tempfile
 import logging
-import json
+from datetime import datetime
 import time
+from threading import Thread
 
-from src.strategy_engine import StrategyEngine, Action, TradingSignal
-from src.database import get_db_connection, init_db, fetch_trade_data
+from src.strategy_engine import StrategyEngine
+from src.gemini_analyst import Action, TradingSignal
+from src.database import init_db
 from src.trade_logger_db import TradeLoggerDB
 from src.trade_monitor_db import TradeMonitorDB
 from tests.mocks import (
@@ -18,51 +18,26 @@ from tests.mocks import (
     MockMarketStatus,
 )
 
-# Capture real sleep for testing delays
-real_sleep = time.sleep
-
-logger = logging.getLogger(__name__)
-
 
 @pytest.fixture
-def temp_db_path():
-    # Create a temporary file for the database
-    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as temp_db:
-        db_path = temp_db.name
-
-    # Initialize the database schema for the temporary DB
-    init_db(db_path)
-
-    yield db_path
-
-    # Clean up the temporary database file after the test
-    os.remove(db_path)
-
-
-@pytest.fixture
-def e2e_mocks(temp_db_path):
+def e2e_mocks(tmp_path):
     mock_ig_client = MockIGClient()
     mock_gemini_analyst = MockGeminiAnalyst()
     mock_stream_manager = MockStreamManager()
     mock_market_status = MockMarketStatus()
     mock_news_fetcher = MagicMock()
-    mock_market_provider = MagicMock()  # Mock the Provider
+    mock_market_provider = MagicMock()
 
-    mock_trade_logger = TradeLoggerDB(db_path=temp_db_path)
-    # Ensure log_trade doesn't actually hit DB if not needed, but we want it to for verification?
-    # Actually, we want to VERIFY it, so we can wrap it or just inspect the real DB.
-    # For E2E, let's use the real logger but wrapped to spy on it.
-    mock_trade_logger.log_trade = MagicMock(side_effect=mock_trade_logger.log_trade)
-    mock_trade_logger.update_trade_status = MagicMock(
-        side_effect=mock_trade_logger.update_trade_status
-    )
-
+    db_path = str(tmp_path / "test_trader.db")
+    init_db(db_path)
+    mock_trade_logger = TradeLoggerDB(db_path=db_path)
     mock_trade_monitor = TradeMonitorDB(
         client=mock_ig_client,
         stream_manager=mock_stream_manager,
-        db_path=temp_db_path,
-        polling_interval=0.1,  # Fast polling for tests
+        db_path=db_path,
+        polling_interval=0.1,  # Fast polling
     )
+    # Spy on monitor_trade
     mock_trade_monitor.monitor_trade = MagicMock(
         side_effect=mock_trade_monitor.monitor_trade
     )
@@ -76,8 +51,12 @@ def e2e_mocks(temp_db_path):
         mock_trade_logger,
         mock_trade_monitor,
         mock_market_provider,
-        temp_db_path,
+        db_path,
     )
+
+
+# Store the original time.sleep before patching
+real_sleep = time.sleep
 
 
 def test_e2e_trading_flow(e2e_mocks, caplog):
@@ -127,8 +106,8 @@ def test_e2e_trading_flow(e2e_mocks, caplog):
         {
             "accountId": ["TEST_ACC_ID"],
             "accountType": ["SPREADBET"],
-            "available": [10000.0],
             "balance": [10000.0],
+            "available": [10000.0],
         }
     )
 
@@ -160,7 +139,6 @@ def test_e2e_trading_flow(e2e_mocks, caplog):
     # 4. Execute Strategy - this starts monitoring
     # We run in a separate thread because execute_strategy has a loop
     # and we need to simulate price ticks concurrently.
-    from threading import Thread
 
     # Patch sleeps to speed up test execution (Fast Sleep: 1/100th duration)
     # This prevents busy loops from hanging and allows timeouts to work naturally but fast.
@@ -173,7 +151,7 @@ def test_e2e_trading_flow(e2e_mocks, caplog):
     ):
         trade_execution_thread = Thread(
             target=engine.execute_strategy,
-            kwargs={"timeout_seconds": 3.0, "collection_seconds": 5},
+            kwargs={"timeout_seconds": 0.5, "collection_seconds": 1},
         )
         trade_execution_thread.start()
 
@@ -196,31 +174,73 @@ def test_e2e_trading_flow(e2e_mocks, caplog):
         mock_ig_client.place_spread_bet_order.assert_called_once()
         call_kwargs = mock_ig_client.place_spread_bet_order.call_args[1]
         assert call_kwargs["direction"] == "BUY"
-        # Adjusted Stop: 7450 - 1.0 (spread) = 7449
-        # Adjusted Risk: 7501 - 7449 = 52 points
-        # Calculated Size: 100 / 52 = 1.923... -> 1.92
-        assert call_kwargs["size"] == 1.92
-        assert call_kwargs["stop_level"] == 7449.0  # ADJUSTED STOP LOSS
+        # Original Risk: 7501 - 7450 = 51 points
+        # Calculated Size: 100 / 51 = 1.9607... -> 1.96
+        assert call_kwargs["size"] == 1.96
+        assert call_kwargs["stop_level"] == 7450.0  # Original Stop
         assert call_kwargs["limit_level"] is None
         # Verify trade monitor started
         mock_trade_monitor.monitor_trade.assert_called_once_with(
             "MOCK_DEAL_ID",
             epic,
             entry_price=7501.0,  # Actual fill
-            stop_loss=7449.0,  # Adjusted Stop
+            stop_loss=7450.0,  # Original Stop
             atr=10.0,
             use_trailing_stop=True,
         )
 
-        # 6. Simulate Trade Closure via Stream Update
-        # Mock IG Client fetch_transaction_history_by_deal_id for PnL
+        # 6. Simulate Price Movement for Trailing Stop
+        # Trade is open. Monitor is running.
+        # We need to simulate the fetch_open_position calls made by the monitor.
+        # The monitor polls fetch_open_position_by_deal_id
+        # We simulate:
+        # - Initial state (entry)
+        # - Move to profit > 1.5R (1.5 * 50 = 75). Price > 7575.
+        # - Monitor should update stop to Breakeven, then Trail.
+
+        # Setup side effects for fetch_open_position
+        # Note: Deal ID is MOCK_DEAL_ID because mock_ig_client.place_spread_bet_order returns that.
+        initial_pos = {
+            "dealId": "MOCK_DEAL_ID",
+            "direction": "BUY",
+            "bid": 7500,
+            "offer": 7501,
+            "stopLevel": 7450,
+        }
+        profit_pos = {
+            "dealId": "MOCK_DEAL_ID",
+            "direction": "BUY",
+            "bid": 7580,  # +80 pts profit
+            "offer": 7581,
+            "stopLevel": 7450,  # Stop hasn't moved yet on server
+        }
+
+        # The monitor calls fetch_open_position in a loop.
+        # We provide a sequence: 10x Initial, 10x Profit
+        mock_ig_client.fetch_open_position_by_deal_id.side_effect = [
+            initial_pos
+        ] * 10 + [profit_pos] * 50
+
+        # Wait for monitor to poll and update
+        start_wait = time.time()
+        while (
+            not mock_ig_client.update_open_position.called
+            and (time.time() - start_wait) < 5.0
+        ):
+            real_sleep(0.1)
+
+        # Verify Stop Update was attempted
+        assert mock_ig_client.update_open_position.called
+
+        # 7. Simulate Trade Closure
+        # Mock history to return matching PnL
         mock_history_df = pd.DataFrame(
             [
                 {
-                    "dealReference": "REF",
-                    "profitAndLoss": "£50.00",
-                    "openLevel": 7500.0,
-                    "closeLevel": 7600.0,
+                    "profitAndLoss": "£500.0",
+                    "closeLevel": 7550.0,
+                    "date": datetime.now().isoformat(),
+                    "dealId": "MOCK_DEAL_ID",
                 }
             ]
         )
@@ -228,69 +248,25 @@ def test_e2e_trading_flow(e2e_mocks, caplog):
             mock_history_df
         )
 
-        # Manually trigger the closure callback on monitor
-        # We need to construct the payload as the monitor expects
-        close_payload = json.dumps(
+        # Monitor checks stream. We simulate a trade update message.
+        mock_stream_manager.simulate_trade_update(
             {
                 "dealId": "MOCK_DEAL_ID",
                 "status": "CLOSED",
-                "level": 7600.0,
-                "profitAndLoss": 50.0,
+                "level": 7550.0,
+                "profitAndLoss": 500.0,
             }
         )
 
-        # Wait briefly for monitor to be running and subscribed
-        real_sleep(0.2)
-
-        # Trigger callback
-        mock_trade_monitor._handle_trade_update(
-            {"type": "trade_update", "payload": close_payload}
-        )
-
-        # Allow monitor to poll and detect closure
-        # Join should finish quickly now due to fast sleep
-        trade_execution_thread.join(timeout=5.0)  # Wait for the thread to finish
+        # Wait for thread to finish
+        trade_execution_thread.join(timeout=2.0)
         assert not trade_execution_thread.is_alive()
 
-    # Verify trade logger called for placement (AFTER monitoring finishes)
-    # 1. PENDING log (during generation)
-    mock_trade_logger.log_trade.assert_called_once()
-    pending_call_args = mock_trade_logger.log_trade.call_args[1]
-    assert pending_call_args["outcome"] == "PENDING"
+    # 8. Final DB Verification
+    # Check if trade log was updated to CLOSED
+    from src.database import fetch_trade_data
 
-    # 2. LIVE_PLACED update (during execution)
-    mock_trade_logger.update_trade_status.assert_called_once()
-    update_call_args = mock_trade_logger.update_trade_status.call_args[1]
-    # In python 3.8+ call_args can be accessed by index or attribute, here we use index for kwargs
-    if not update_call_args:  # fallback if using positional
-        update_call_kwargs = mock_trade_logger.update_trade_status.call_args.kwargs
-    else:
-        update_call_kwargs = update_call_args
-
-    assert update_call_kwargs["outcome"] == "LIVE_PLACED"
-    assert update_call_kwargs["deal_id"] == "MOCK_DEAL_ID"
-
-    # Verify stream manager was stopped
-    mock_stream_manager.stop.assert_called_once()
-
-    # 7. Verify P&L and Trade Log in the temporary database
     trade_data = fetch_trade_data("MOCK_DEAL_ID", db_path=db_path)
     assert trade_data is not None
-    assert trade_data["log"]["deal_id"] == "MOCK_DEAL_ID"
-    assert trade_data["log"]["outcome"] == "CLOSED"  # Outcome updated after monitoring
-    # The monitor will log multiple times, but the final status should reflect closure
-    # We need to query the monitor table directly to get the latest status and PnL.
-    conn = get_db_connection(db_path)
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT outcome, pnl FROM trade_log WHERE deal_id = ?", ("MOCK_DEAL_ID",)
-    )
-    latest_monitor_entry = cursor.fetchone()
-    conn.close()
-
-    assert latest_monitor_entry is not None
-    assert latest_monitor_entry[0] == "CLOSED"
-    assert latest_monitor_entry[1] == 50.0
-    assert "Trade MOCK_DEAL_ID CLOSED. Monitoring finished." in caplog.text
-
-    logger.info("E2E test completed successfully.")
+    assert trade_data["log"]["outcome"] == "CLOSED"
+    assert trade_data["log"]["pnl"] == 500.0

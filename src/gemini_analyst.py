@@ -127,7 +127,7 @@ class GeminiAnalyst:
                 - **Range Days:** Use `use_trailing_stop=False` and target a fixed Resistance/Support level (R:R > 1.5).
             - **Plan Validity (Time):**
                 - **BUY/SELL:** Set `validity_time_minutes` to 15-30 mins for fast breakout setups. If the breakout doesn't happen quickly, the setup is invalid. Use 60 mins only for major structural levels.
-                - **WAIT:** Set `validity_time_minutes` to indicate when to re-check. E.g., 5-15 mins if price is coiling and a breakout is imminent. 30-60 mins if market is dead/choppy.
+                - **WAIT:** The system will automatically re-evaluate in 5 minutes. You do not need to specify a duration for WAIT.
 
             ### 3. Contrarian Checks
             - **Retail Sentiment:** If >70% Long, be cautious of Longs (Crowded Trade). If >70% Short, look for Short Squeezes.

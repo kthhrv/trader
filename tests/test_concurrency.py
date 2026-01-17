@@ -71,6 +71,7 @@ def create_engine(epic, strategy_name, db_path, deal_id):
                 "accountId": "MOCK_ACC",
                 "accountType": "SPREADBET",
                 "preferred": True,
+                "balance": 10000.0,
                 "available": 10000.0,
             }
         ]

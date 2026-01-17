@@ -13,7 +13,7 @@ def mock_deps():
 
     # Mock account info
     mock_client.get_account_info.return_value = pd.DataFrame(
-        {"accountId": ["ACC1"], "available": [10000.0]}
+        {"accountId": ["ACC1"], "balance": [10000.0], "available": [10000.0]}
     )
     mock_client.service.account_id = "ACC1"
 

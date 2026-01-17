@@ -5,6 +5,7 @@ import tempfile
 import logging
 import time
 from threading import Thread
+import pandas as pd  # Added
 
 from src.strategy_engine import StrategyEngine
 from src.gemini_analyst import Action, TradingSignal, EntryType
@@ -40,6 +41,12 @@ def advanced_mocks(temp_db_path):
 
     mock_trade_logger = TradeLoggerDB(db_path=temp_db_path)
     mock_trade_logger.log_trade = MagicMock(side_effect=mock_trade_logger.log_trade)
+
+    # Mock account info for dynamic sizing (Required for TradeExecutor)
+    mock_ig_client.get_account_info.return_value = pd.DataFrame(
+        {"accountId": ["TEST_ACC_ID"], "balance": [10000.0], "available": [10000.0]}
+    )
+    mock_ig_client.service.account_id = "TEST_ACC_ID"
 
     # Fast polling for test speed
     mock_trade_monitor = TradeMonitorDB(
@@ -124,12 +131,12 @@ def test_e2e_trailing_stop(advanced_mocks, caplog):
 
     # Verify Trade Placed
     mock_ig_client.place_spread_bet_order.assert_called_once()
-    # Adjusted Stop: 7450 - 1.0 (spread) = 7449
+    # Original Stop: 7450.0 (No adjustment)
     mock_trade_monitor.monitor_trade.assert_called_once_with(
         "MOCK_DEAL_ID",
         epic,
         entry_price=7501.0,
-        stop_loss=7449.0,
+        stop_loss=7450.0,
         atr=10.0,
         use_trailing_stop=True,
     )
@@ -143,7 +150,7 @@ def test_e2e_trailing_stop(advanced_mocks, caplog):
         "direction": "BUY",
         "bid": 7500,
         "offer": 7501,
-        "stopLevel": 7449,  # Adjusted SL
+        "stopLevel": 7450,  # Original SL
     }
 
     # Move 1: Profit < 1.5R.
@@ -152,20 +159,20 @@ def test_e2e_trailing_stop(advanced_mocks, caplog):
         "direction": "BUY",
         "bid": 7550,
         "offer": 7551,
-        "stopLevel": 7449,
+        "stopLevel": 7450,
     }
 
-    # Move 2: Profit > 1.5R (7501 + 1.5*52 = 7579). Price = 7590.
+    # Move 2: Profit > 1.5R (7501 + 1.5*50 = 7576). Price = 7590.
     move_2_pos = {
         "dealId": "MOCK_DEAL_ID",
         "direction": "BUY",
         "bid": 7590,
         "offer": 7591,
-        "stopLevel": 7449,
+        "stopLevel": 7450,
     }
 
     # Dynamic mock for fetch_open_position that reflects updated stop levels
-    current_pos_state = {"stopLevel": 7449.0}  # Initial adjusted SL
+    current_pos_state = {"stopLevel": 7450.0}  # Initial SL
 
     def fetch_pos_side_effect(deal_id):
         # Determine base price based on time/call count logic or just iterate through a sequence?
@@ -223,7 +230,7 @@ def test_e2e_trailing_stop(advanced_mocks, caplog):
 
     # First update: Breakeven
     args1 = mock_ig_client.update_open_position.call_args_list[0]
-    assert args1[1]["stop_level"] == 7501.0  # Entry Price (Adjusted)
+    assert args1[1]["stop_level"] == 7501.0  # Entry Price
 
     # Second update: Trailing (ATR 10 * 3 = 30. Price 7590 - 30 = 7560)
     args2 = mock_ig_client.update_open_position.call_args_list[1]

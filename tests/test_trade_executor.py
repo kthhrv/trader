@@ -49,8 +49,8 @@ def test_execute_trade_success(mock_deps):
 
     assert success is True
     mock_client.place_spread_bet_order.assert_called_once()
-    # Stop adjusted for spread: 90 - 1 = 89
-    assert mock_client.place_spread_bet_order.call_args[1]["stop_level"] == 89.0
+    # Stop should be original (90.0)
+    assert mock_client.place_spread_bet_order.call_args[1]["stop_level"] == 90.0
 
     mock_monitor.monitor_trade.assert_called_once()
     mock_logger.update_trade_status.assert_called_once()

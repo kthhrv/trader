@@ -386,7 +386,7 @@ def test_place_market_order_spread_too_wide(mock_components, caplog):
     current_time = [100.0]
 
     def mock_time():
-        current_time[0] += 0.001
+        current_time[0] += 0.1
         return current_time[0]
 
     def trigger_update(seconds):

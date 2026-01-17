@@ -95,6 +95,7 @@ class StrategyEngine:
         self.price_lock = threading.Lock()  # Lock for synchronizing price updates
         self.last_skipped_log_time: float = 0.0  # For rate-limiting skipped logs
         self.last_analysis_time: float = 0.0
+        self.wait_retry_count: int = 0  # Track consecutive WAIT retries
 
     def generate_plan(self):
         """
@@ -316,34 +317,61 @@ class StrategyEngine:
                         getattr(self.active_plan, "validity_time_minutes", 30) * 60
                     )
 
+                    # Override for WAIT logic (5-min retries)
+                    if (
+                        self.active_plan.action == Action.WAIT
+                        and self.wait_retry_count < 2
+                    ):
+                        validity_seconds = 300  # 5 minutes
+
                     if (now - self.last_analysis_time) > validity_seconds:
-                        logger.info(
-                            f"⏳ Plan Validity Expired ({validity_seconds}s). Re-analyzing market..."
-                        )
-
-                        # If we were PENDING, log expiration outcome before overwritting
-                        if self.active_plan.action != Action.WAIT:
-                            if self.active_plan_id:
-                                self.trade_logger.update_trade_status(
-                                    row_id=self.active_plan_id,
-                                    outcome="EXPIRED",
-                                    deal_id=None,
-                                )
-
-                        # Re-Analyze
-                        self._run_analysis()
-
-                        if self.active_plan:
+                        # Check for Strikeout (Initial + 2 Retries = 3 Strikes)
+                        if (
+                            self.active_plan.action == Action.WAIT
+                            and self.wait_retry_count >= 2
+                        ):
                             logger.info(
-                                f"🔄 New Plan Generated: {self.active_plan.action}"
+                                "WAIT signal persists after 2 retries (3 strikes). Ending active monitoring for this session."
                             )
-                            # Reset decision/active flags to allow trading if new plan is valid
+                            trading_active = False
+                            decision_made = True  # Stop further checks
+                        else:
+                            logger.info(
+                                f"⏳ Plan Validity Expired ({validity_seconds}s). Re-analyzing market..."
+                            )
+
+                            # If we were PENDING, log expiration outcome before overwritting
                             if self.active_plan.action != Action.WAIT:
-                                decision_made = False
-                                trading_active = True
-                            else:
-                                # If new plan is WAIT, we just loop and wait for next validity check
-                                trading_active = False
+                                if self.active_plan_id:
+                                    self.trade_logger.update_trade_status(
+                                        row_id=self.active_plan_id,
+                                        outcome="EXPIRED",
+                                        deal_id=None,
+                                    )
+
+                            # Re-Analyze
+                            self._run_analysis()
+
+                            if self.active_plan:
+                                logger.info(
+                                    f"🔄 New Plan Generated: {self.active_plan.action}"
+                                )
+                                # Update Retry Counter
+                                if self.active_plan.action == Action.WAIT:
+                                    self.wait_retry_count += 1
+                                    logger.info(
+                                        f"WAIT signal received. Retry count: {self.wait_retry_count}/2"
+                                    )
+                                else:
+                                    self.wait_retry_count = 0  # Reset on valid signal
+
+                                # Reset decision/active flags to allow trading if new plan is valid
+                                if self.active_plan.action != Action.WAIT:
+                                    decision_made = False
+                                    trading_active = True
+                                else:
+                                    # If new plan is WAIT, we just loop and wait for next validity check
+                                    trading_active = False
 
                 # --- Trading Logic (Only if within timeout and no decision yet) ---
                 if trading_active and not self.position_open and not decision_made:

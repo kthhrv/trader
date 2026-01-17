@@ -49,17 +49,8 @@ class TradeExecutor:
                 logger.error("Trade aborted: No Stop Loss provided.")
                 return False
 
-            # Adjust Stop Loss by widening it by the current spread
-            original_sl = plan.stop_loss
-            adjusted_sl = original_sl
-            if plan.action == Action.BUY:
-                adjusted_sl = original_sl - current_spread
-            elif plan.action == Action.SELL:
-                adjusted_sl = original_sl + current_spread
-
-            logger.info(
-                f"Adjusting Stop Loss for spread ({current_spread}): {original_sl} -> {adjusted_sl}"
-            )
+            # Use original stop loss (do not widen for spread to preserve structural integrity)
+            adjusted_sl = plan.stop_loss
 
             # Calculate Position Size
             # Use plan.size if explicitly set (e.g. for testing), otherwise calculate dynamically

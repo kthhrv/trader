@@ -97,9 +97,8 @@ def test_slippage_reduces_size_fixed_stop_loss(mock_components, caplog):
     # Mock account info for size calculation
     # Balance 10000, 1% risk = 100 currency units.
     mock_client.get_account_info.return_value = pd.DataFrame(
-        {"accountId": ["TEST_ACC_ID"], "available": [10000.0]}
+        {"accountId": ["TEST_ACC_ID"], "balance": [10000.0], "available": [10000.0]}
     )
-
     with (
         patch("time.sleep", side_effect=trigger_price_update),
         patch("time.time", side_effect=mock_time),
@@ -110,16 +109,16 @@ def test_slippage_reduces_size_fixed_stop_loss(mock_components, caplog):
     assert engine.position_open is True
 
     # CRITICAL CHECKS:
-    # 1. Was the stop loss ADJUSTED for spread (1050-1045=5)? -> 900 - 5 = 895.0
+    # 1. Was the stop loss KEPT at 900.0? (Fixed Structural Level)
     # 2. Was the size REDUCED to maintain risk?
-    # Risk distance: 1050 - 895 = 155 pts.
-    # Size: 100 / 155 = 0.645... -> 0.65
+    # Risk distance: 1050 - 900 = 150 pts.
+    # Size: 100 / 150 = 0.666... -> 0.67
     mock_client.place_spread_bet_order.assert_called_once_with(
         epic=ANY,
         direction="BUY",
-        size=0.65,
+        size=0.67,
         level=1050.0,
-        stop_level=895.0,  # ADJUSTED!
+        stop_level=900.0,  # FIXED!
         limit_level=None,
     )
 
@@ -128,7 +127,7 @@ def test_slippage_reduces_size_fixed_stop_loss(mock_components, caplog):
         row_id=123,
         outcome="LIVE_PLACED",
         deal_id="OK",
-        size=0.65,
+        size=0.67,
         entry=1050.0,
-        stop_loss=895.0,
+        stop_loss=900.0,
     )
